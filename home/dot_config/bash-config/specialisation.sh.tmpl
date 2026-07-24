@@ -1,0 +1,19 @@
+#!/bin/bash
+# ==============================================================================
+# SPECIALISATION
+# ==============================================================================
+# Rendered by chezmoi from home/dot_config/bash-config/specialisation.sh.tmpl.
+# Collapsed from the old specialisations/bashrc_{frostpaw,diamond,asteria}
+# files: chezmoi emits only the block for this machine's specialisation, so
+# there is no runtime switch. To change a machine's behaviour, edit the
+# matching partial under home/.chezmoitemplates/specialisation-*.
+# ==============================================================================
+{{ if eq .specialisation "frostpaw" -}}
+{{ template "specialisation-frostpaw" . }}
+{{- else if eq .specialisation "diamond" -}}
+{{ template "specialisation-diamond" . }}
+{{- else if eq .specialisation "asteria" -}}
+{{ template "specialisation-asteria" . }}
+{{- else -}}
+# Unknown specialisation "{{ .specialisation }}" - no block rendered.
+{{- end }}
