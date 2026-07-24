@@ -1,0 +1,60 @@
+# ==============================================================================
+# FROSTPAW SPECIALISATION
+# ==============================================================================
+# Personal machine configuration: mainly the Arch/KDE workstation, but also
+# runs on Ubuntu (DGX Spark) and Debian (VPS), so nothing here may assume a
+# specific distro; gate on command/file existence instead.
+# Provides:
+#   - Tailscale VPN management
+#   - Fastfetch configuration
+#   - Mamba/micromamba compatibility
+#   - SSH askpass for GUI apps (KDE desktop only)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Tailscale VPN Management
+# ------------------------------------------------------------------------------
+alias tsdown='sudo tailscale down && echo "✅ Tailscale disconnected"'
+# alias tsup='sudo tailscale up --accept-routes --accept-dns --ssh && echo "✅ Tailscale connected"'
+# Allow passing additional arguments to tsup, such as --reset
+tsup() {
+  if sudo tailscale up --accept-routes --accept-dns --ssh "$@"; then
+    echo "✅ Tailscale connected"
+  else
+    echo "❌ Tailscale failed to connect. Try: tsup --reset"
+    return 1
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# Fastfetch Configuration
+# ------------------------------------------------------------------------------
+# Not exporting FASTFETCH_BIN as the binary is already in the PATH
+# Pick an ARM-friendly config on aarch64, otherwise use the default Frostpaw one.
+if [ -z "${FASTFETCH_CONFIG:-}" ]; then
+  if [ "$(uname -m)" = "aarch64" ]; then
+    export FASTFETCH_CONFIG="$BASH_CONFIG_DIR/configs/fastfetch_spark.jsonc"
+  else
+    export FASTFETCH_CONFIG="$BASH_CONFIG_DIR/configs/fastfetch_frostpaw.jsonc"
+  fi
+fi
+
+# ------------------------------------------------------------------------------
+# Mamba Compatibility
+# ------------------------------------------------------------------------------
+# If mamba is not installed, alias to micromamba
+if ! command -v mamba &>/dev/null; then
+  alias mamba='micromamba'
+fi
+
+# ------------------------------------------------------------------------------
+# SSH Askpass (KDE desktop only)
+# ------------------------------------------------------------------------------
+# Lets GUI-launched processes (VS Code, git GUIs) prompt for key passphrases.
+# "prefer" still uses the terminal when one is available. Gated on the binary
+# existing; headless Ubuntu/Debian frostpaw machines won't have it.
+if command -v ksshaskpass &>/dev/null; then
+  export SSH_ASKPASS
+  SSH_ASKPASS=$(command -v ksshaskpass)
+  export SSH_ASKPASS_REQUIRE=prefer
+fi
