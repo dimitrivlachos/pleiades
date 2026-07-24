@@ -8,11 +8,15 @@ other machines over.
 The config review traced the "ssh doesn't feel smooth" problem to a few
 compounding issues:
 
-1. **No key caching anywhere.** Nothing ever loaded a key into an agent. On
-   frostpaw no agent ran at all; on diamond an agent was started but kept
-   deliberately empty. Since the only GitHub keys deployed on frostpaw were
-   the YubiKey SK ones, every single git fetch/push required a physical
-   touch.
+1. **The touch-per-push was a key-deployment problem, not an agent
+   problem.** The hosts that demanded a YubiKey touch on every fetch were
+   the ones where the only GitHub key deployed was an SK key. With a
+   properly issued non-SK key the same operation is silent. An agent does
+   not change that: an SK touch is a per-signature hardware requirement,
+   so nothing can cache it away. What the missing agent actually cost was
+   re-prompting for the passphrase on ordinary non-SK keys, once per
+   operation instead of once per boot. On frostpaw no agent ran at all;
+   on diamond one was started but kept deliberately empty.
 2. **Phantom keys in ssh_config.** The bare `github.com` host pointed at
    `id_ed25519_github`, which does not exist on any machine, with
    `IdentitiesOnly yes`. Plain `git@github.com:` URLs offered no key at all.
@@ -38,8 +42,12 @@ control socket that should not exist given `ControlMaster no` for GitHub.
 
 ## The new design
 
-**One agent per machine, keys cached on first use, no pileup by
-construction.**
+**One agent per machine, no pileup by construction.** The agent and
+systemd machinery below landed on this branch. The ssh_config half that
+makes keys cache on first use (`AddKeysToAgent`, the per-machine key
+blocks) is not landed here and is folded into the chezmoi migration
+instead, see the follow-ups. Until then the managed agent runs and stays
+empty, which is harmless.
 
 - `configs/systemd/user/ssh-agent.service` runs a single agent on a fixed
   socket (`$XDG_RUNTIME_DIR/ssh-agent.socket`). systemd will not start a
@@ -56,29 +64,35 @@ construction.**
   that started it. `bc_ssh_agent_status` shows the agent count and
   `bc_ssh_agent_prune` kills anything that is not the managed agent, so
   pileup would be visible and fixable if it ever came back.
-- `AddKeysToAgent yes` in ssh_config loads each key into the agent the
-  first time it is used. Passphrase (or YubiKey touch) once per boot, not
-  once per operation.
-- Key strategy: regular ed25519 keys for daily use, SK keys stay as
-  fallback. Each machine generates its own keys under the filenames
-  ssh_config already probes for (`Match exec test -f` gates), so private
-  keys never enter git and a stolen laptop means revoking one key, not all
-  of them. `bc_setup_ssh_keys` generates whatever is missing for the
-  machine's specialisation and prints the public keys with upload
-  instructions.
+- Planned (with chezmoi): `AddKeysToAgent yes` in ssh_config so each
+  non-SK key loads into the agent on first use, turning its passphrase
+  into a once-per-boot prompt. This does nothing for SK keys, whose touch
+  is per-signature.
+- Key strategy: regular ed25519 keys for daily use, SK keys as fallback.
+  `bc_setup_ssh_keys` generates whatever the specialisation is missing and
+  prints the public keys to deploy. The GitHub keys it makes
+  (`id_ed25519_github_d`/`_s`) are already wired into ssh_config through
+  `Match exec test -f` gates; the `id_ed25519_personal` key it also
+  generates is not referenced by any host block yet, so wiring the
+  personal machines onto a shared non-SK key is part of the chezmoi work.
 
-### ssh_config changes (secrets repo)
+### ssh_config changes still to make (deferred to chezmoi)
+
+None of these landed on this branch; the secrets commit that held them
+was lost before it was pushed (see follow-ups). They are the ssh_config
+half of the rework, to be redone as part of the chezmoi migration:
 
 - `AddKeysToAgent yes` under `Host *`.
-- Bare `github.com` now resolves to the main account's keys through the
-  same match gates as `github.com-d`, so plain clone URLs work.
-- Legacy `id_ed25519_d`/`id_ed25519_s` blocks removed.
-- Personal machines and atlas offer a shared non-SK `id_ed25519_personal`
-  first (file-gated), per-machine SK keys remain as fallback.
-- Grace Hopper hosts use `id_ed25519_diamond` plus SK fallback and keep
-  `ForwardAgent yes`, which now actually does something because the local
-  agent holds keys. GH boxes have local homes off the NFS share, so agent
-  forwarding is the GitHub mechanism there rather than deployed keys.
+- Bare `github.com` to resolve to the main account's keys through the
+  same match gates as `github.com-d`, so plain clone URLs work. It still
+  points at the nonexistent `id_ed25519_github`.
+- Remove the legacy `id_ed25519_d`/`id_ed25519_s` blocks.
+- Personal machines and atlas to offer a shared non-SK
+  `id_ed25519_personal` first (file-gated), per-machine SK keys as
+  fallback. `ForwardAgent yes` on the Grace Hopper and atlas hosts is
+  already in place and stays, so a forwarded agent that now holds keys
+  becomes the GitHub mechanism on the GH boxes (local homes, off the NFS
+  share).
 
 ## Moving a machine over
 
@@ -90,8 +104,9 @@ git pull
 
 The script removes the old agent state files, installs and enables the
 systemd unit (or notes the env-file fallback on diamond), prunes stray
-agents, verifies the agent and `AddKeysToAgent` are live, and offers key
-generation when run from a terminal.
+agents, verifies the agent is reachable, and offers key generation when
+run from a terminal. Its `AddKeysToAgent` check will warn until the
+ssh_config half lands, which is expected on this branch.
 
 Manual bits after the script:
 
@@ -120,6 +135,10 @@ bc_ssh_agent_status
   duplicates of the current SK handles (different fingerprints, older
   YubiKey registration). Check both GitHub accounts for old registered
   keys with those fingerprints before deleting the files.
+- The secrets submodule commit that carried the ssh_config rework
+  (`db7081a`) was never pushed and is unrecoverable. The branch pointer
+  is reset to secrets `origin/main`, and that ssh_config work is now part
+  of the chezmoi migration below rather than a separate secrets commit.
 - `secrets/sk_ssh_handles/` still carries an `id_ecdsa_sk_*` set that
   nothing references; candidate for deletion.
 - Fixed in passing: `bc_log_debug` returned status 1 when debug was off,
