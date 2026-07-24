@@ -1,0 +1,3 @@
+# Static template data, merged into chezmoi's data dict and available as
+# {{ .name }} in any .tmpl. Add machine/host lists and specialisation
+# facts here as the templates need them (Phases 2-3).
