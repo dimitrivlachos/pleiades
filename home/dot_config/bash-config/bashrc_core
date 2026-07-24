@@ -1,0 +1,123 @@
+#!/bin/bash
+# ==============================================================================
+# BASHRC CORE - Main Orchestrator
+# ==============================================================================
+# Central configuration loader for bash-config system.
+# Deployed by chezmoi to ~/.config/bash-config/ and sourced from ~/.bashrc.
+#
+# Load Order:
+#   1. bash_logging       - Color constants and bc_log_* functions (loaded first)
+#   2. bash_secrets.sh    - Sensitive credentials (age-encrypted, decrypted by chezmoi)
+#   3. bash_aliases       - Shared aliases
+#   4. bash_exports       - Shared environment variables
+#   5. bash_prompt        - Prompt configuration
+#   6. bash_tools         - Utility functions
+#   7. bash_ssh           - SSH management
+#   8. bash_history       - History management
+#   9. bash_config_update - bash-config self-update via chezmoi (bc_check_updates)
+#  10. specialisation.sh  - Machine-specific configuration (rendered by chezmoi)
+#
+# Environment Variables:
+#   BASH_SPECIALISATION  - Set in ~/.bashrc to select specialisation
+#   BASH_CONFIG_DIR      - Auto-detected directory of this config
+#   BASH_CONFIG_DEBUG    - Set to "true" to enable debug logging
+# ==============================================================================
+
+export BASH_CONFIG_VERSION="2.0.0"
+
+# ==============================================================================
+# PATH RESOLUTION
+# ==============================================================================
+# Resolve the real path of this script (handles symlinks)
+__realpath() {
+  local path="$1"
+  while [ -L "$path" ]; do
+    path="$(readlink "$path")"
+    [[ "$path" != /* ]] && path="$(dirname "$1")/$path"
+  done
+  cd "$(dirname "$path")" && pwd
+}
+
+export BASH_CONFIG_DIR="${BASH_CONFIG_DIR:-$(__realpath "${BASH_SOURCE[0]}")}"
+
+# Validate configuration directory
+if [[ ! -d "$BASH_CONFIG_DIR" ]]; then
+  echo "[ERROR] BASH_CONFIG_DIR not found: $BASH_CONFIG_DIR" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+# ==============================================================================
+# MODULE LOADER
+# ==============================================================================
+# Source a file if it exists, with optional description for warnings
+bc_source_if_exists() {
+  local file="$1"
+  local description="${2:-$file}"
+  if [[ -f "$file" ]]; then
+    source "$file"
+  else
+    echo "[WARN] $description not found: $file" >&2
+  fi
+}
+
+# Load core modules
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_logging" "Logging"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_secrets.sh" "Secrets file"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_aliases" "Aliases"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_exports" "Exports"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_prompt" "Prompt configuration"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_tools" "Tools and functions"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_certs" "Certificate management"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_ssh" "SSH management"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_history" "History management"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_update" "Update utilities"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_config_update" "Config self-update"
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_project" "Project workspace management"
+
+# ==============================================================================
+# SPECIALISATION LOADER
+# ==============================================================================
+# chezmoi renders specialisation.sh for the active machine (collapsed from the
+# old per-name specialisations/bashrc_* files), so there is a single file to
+# source here rather than a runtime switch.
+bc_source_if_exists "$BASH_CONFIG_DIR/specialisation.sh" "Specialisation"
+
+# ==============================================================================
+# INITIALIZATION
+# ==============================================================================
+# Initialize prompt and history PROMPT_COMMAND
+# set_prompt runs once to build the initial PS1, then PROMPT_COMMAND is set so
+# it re-runs before every prompt.  bc_history_init() appends its own hooks
+# *after* this assignment, so ordering is guaranteed correct.
+set_prompt
+PROMPT_COMMAND="set_prompt"
+
+# Load bash-preexec so atuin's precmd/preexec hooks are active.
+# Delegates to bc_source_bash_preexec (defined in bash_history) which checks
+# system package paths, $HOME install, and the chezmoi-managed external in order.
+if declare -f bc_source_bash_preexec >/dev/null 2>&1; then
+  bc_source_bash_preexec
+fi
+
+if declare -f bc_history_init >/dev/null 2>&1; then
+  bc_history_init
+fi
+
+# Interactive shell features
+if [[ $- == *i* ]]; then
+  # Show system info on login
+  bc_ff
+
+  # Daily update check (only on real terminals, not scripts/pipes).
+  # Stamp lives in the cache dir, not BASH_CONFIG_DIR, which chezmoi manages.
+  if [[ -t 0 ]]; then
+    update_check_file="${XDG_CACHE_HOME:-$HOME/.cache}/bash-config/.last_update_check"
+    current_date=$(date +%Y%m%d)
+
+    if [[ ! -f "$update_check_file" ]] || [[ "$(cat "$update_check_file" 2>/dev/null)" != "$current_date" ]]; then
+      bc_check_updates notify
+      mkdir -p "$(dirname "$update_check_file")"
+      echo "$current_date" > "$update_check_file"
+    fi
+  fi
+fi
