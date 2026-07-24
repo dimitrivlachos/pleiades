@@ -1,0 +1,105 @@
+#!/bin/bash
+# ==============================================================================
+# BASH-CONFIG SELF-UPDATE UTILITIES
+# ==============================================================================
+# Functions for keeping the bash-config source up-to-date. Since chezmoi owns
+# the source repo and deploys the modules, these wrap `chezmoi` rather than
+# git-pulling BASH_CONFIG_DIR (which is now a copy, not a checkout).
+# Separate from bash_update, which manages OS package updates.
+#
+# Usage:
+#   bc_check_updates [mode]    - Check if the chezmoi source has upstream changes
+#   bc_update_config [action]  - Show pending changes or apply an update
+#
+# Modes for bc_check_updates: notify (default), silent, verbose
+# Actions for bc_update_config: show (default), update
+# ==============================================================================
+
+# Number of commits the chezmoi source is behind its upstream, or empty on
+# failure. Fetches first so the comparison is against fresh remote state.
+_bc_source_behind() {
+  local timeout_s="${1:-5}"
+  if ! GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=2" \
+       timeout "$timeout_s" chezmoi git -- fetch --quiet 2>/dev/null; then
+    return 1
+  fi
+  chezmoi git -- rev-list --count 'HEAD..@{u}' 2>/dev/null
+}
+
+# Check if the bash-config source is up-to-date with its upstream
+bc_check_updates() {
+  local check_mode="${1:-notify}"  # notify, silent, or verbose
+
+  if ! command -v chezmoi >/dev/null 2>&1; then
+    [[ "$check_mode" == "verbose" ]] && bc_log_warn "chezmoi not installed"
+    return 1
+  fi
+
+  bc_log_debug "Checking for bash-config updates via the chezmoi source repo"
+
+  local behind
+  if ! behind=$(_bc_source_behind 5); then
+    [[ "$check_mode" == "verbose" ]] && bc_log_warn "Failed to fetch updates (network issue or timeout)"
+    return 1
+  fi
+
+  if [[ -n "$behind" && "$behind" -gt 0 ]]; then
+    if [[ "$check_mode" != "silent" ]]; then
+      bc_log_warn "bash-config is $behind commit(s) behind upstream"
+      bc_log_info "Run 'bc_update_config' to review or 'chezmoi update' to apply"
+    fi
+    return 2  # Behind upstream
+  fi
+
+  [[ "$check_mode" == "verbose" ]] && bc_log_success "bash-config is up-to-date"
+  return 0
+}
+
+# Show what would change if we updated, or perform the update
+bc_update_config() {
+  local action="${1:-show}"  # show, update
+
+  if ! command -v chezmoi >/dev/null 2>&1; then
+    bc_log_error "chezmoi not installed"
+    return 1
+  fi
+
+  bc_log_info "Fetching latest changes..."
+  local behind
+  if ! behind=$(_bc_source_behind 15); then
+    bc_log_error "Failed to fetch updates (network issue or timeout)"
+    return 1
+  fi
+
+  if [[ -z "$behind" || "$behind" -eq 0 ]]; then
+    bc_log_success "Already up-to-date!"
+    return 0
+  fi
+
+  case "$action" in
+    "show")
+      bc_log_info "Incoming source changes:"
+      echo ""
+      chezmoi git -- --no-pager log --oneline --graph --decorate 'HEAD..@{u}'
+      echo ""
+      bc_log_info "Local files that 'chezmoi update' would change:"
+      chezmoi update --dry-run 2>/dev/null || true
+      echo ""
+      bc_log_info "Run 'bc_update_config update' (or 'chezmoi update') to apply"
+      ;;
+    "update")
+      bc_log_info "Updating bash-config via chezmoi..."
+      if chezmoi update; then
+        bc_log_success "Successfully updated to latest version"
+        bc_log_info "Restart your shell or run: source ~/.bashrc"
+      else
+        bc_log_error "chezmoi update failed. Inspect: chezmoi doctor"
+        return 1
+      fi
+      ;;
+    *)
+      bc_log_error "Unknown action: $action (use 'show' or 'update')"
+      return 1
+      ;;
+  esac
+}

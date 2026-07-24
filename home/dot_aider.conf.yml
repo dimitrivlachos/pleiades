@@ -1,0 +1,18 @@
+##########################################################
+# aider configuration
+# Deployed to ~/.aider.conf.yml by chezmoi
+##########################################################
+
+# OpenAI-compatible inference server
+# OPENAI_API_BASE and OPENAI_API_KEY are set per-machine in the encrypted
+# bash_secrets.sh (a local endpoint on some hosts, a remote one on others).
+# They are intentionally omitted here so nothing sensitive lives in this file.
+
+# Default model — prefix with "openai/" to route through the OpenAI-compatible endpoint
+model: openai/qwen3-coder-next
+model-metadata-file: ~/.aider.model.metadata.json
+
+# Sensible defaults
+stream: true
+pretty: true
+git: true
