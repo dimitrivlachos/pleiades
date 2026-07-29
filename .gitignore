@@ -3,4 +3,3 @@
 # real plaintext, including the pre-rotation API key) but must never be
 # tracked here.
 /secrets/
-.last_update_check
