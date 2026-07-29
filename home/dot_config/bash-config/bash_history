@@ -156,30 +156,25 @@ bc_setup_atuin_daemon() {
     return 1
   fi
 
-  local src_dir="${BASH_CONFIG_DIR:-}/configs/systemd/user"
   local dest_dir="$HOME/.config/systemd/user"
   local units=(atuin-daemon.service atuin-daemon-healthcheck.service atuin-daemon-healthcheck.timer)
 
-  if [[ ! -d "$src_dir" ]]; then
-    bc_log_error "systemd unit source dir not found: $src_dir"
-    return 1
-  fi
   if ! command -v systemctl >/dev/null 2>&1; then
     bc_log_error "systemctl not found — this host does not use systemd"
     return 1
   fi
-  if [[ ! -x "$HOME/.atuin/bin/atuin" ]]; then
-    bc_log_warn "atuin binary not at ~/.atuin/bin/atuin — units reference that path"
-    bc_log_info "Adjust ExecStart in $src_dir if atuin is installed elsewhere"
-  fi
-
-  # Symlink the repo-managed units into the user unit dir so edits track the repo.
-  mkdir -p "$dest_dir"
+  # chezmoi deploys the units to $dest_dir; confirm they arrived before enabling.
   local u
   for u in "${units[@]}"; do
-    ln -sf "$src_dir/$u" "$dest_dir/$u"
-    bc_log_debug "Linked $u -> $src_dir/$u"
+    if [[ ! -f "$dest_dir/$u" ]]; then
+      bc_log_error "Unit not deployed: $dest_dir/$u — run 'chezmoi apply' first"
+      return 1
+    fi
   done
+  if [[ ! -x "$HOME/.atuin/bin/atuin" ]]; then
+    bc_log_warn "atuin binary not at ~/.atuin/bin/atuin — units reference that path"
+    bc_log_info "Adjust ExecStart in the source unit if atuin is installed elsewhere"
+  fi
 
   # Keep the user manager (and /run/user/<uid>) alive across logout so the daemon
   # stays up over long uptimes rather than dying with the last session.

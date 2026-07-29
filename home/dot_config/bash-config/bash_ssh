@@ -30,130 +30,6 @@
 # SSH CONFIG MANAGEMENT
 # ==============================================================================
 
-# Setup SSH config via symlink to secrets
-bc_setup_ssh_config() {
-    local ssh_dir="$HOME/.ssh"
-    local config_file="$ssh_dir/config"
-    local secrets_ssh_config="$BASH_CONFIG_DIR/secrets/ssh_config"
-    local backup_suffix=".backup.$(date +%Y%m%d_%H%M%S)"
-    
-    bc_log_debug "Setting up SSH config: $config_file -> $secrets_ssh_config"
-    
-    # Ensure SSH directory exists
-    mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
-    bc_log_debug "SSH directory created/verified: $ssh_dir"
-    
-    # Check if secrets SSH config exists
-    if [[ ! -f "$secrets_ssh_config" ]]; then
-        bc_log_error "SSH config not found in secrets: $secrets_ssh_config"
-        return 1
-    fi
-    bc_log_debug "Secrets SSH config found: $secrets_ssh_config"
-    
-    # Check if already correctly configured
-    if bc_check_ssh_config silent >/dev/null 2>&1; then
-        bc_log_info "SSH config already correctly configured"
-        # Still ensure smart-proxy symlink exists even if config is already set up
-        bc_setup_smart_proxy
-        return 0
-    fi
-    
-    # Handle existing config file
-    if [[ -L "$config_file" ]]; then
-        local current_target=$(readlink "$config_file")
-        bc_log_info "Removing existing symlink (pointed to: $current_target)"
-        rm "$config_file"
-    elif [[ -f "$config_file" ]]; then
-        mv "$config_file" "${config_file}${backup_suffix}"
-        bc_log_info "Backed up existing SSH config to: ${config_file}${backup_suffix}"
-    fi
-    bc_log_debug "Handled existing config file"
-    
-    # Create symlink and set permissions
-    ln -s "$secrets_ssh_config" "$config_file"
-    chmod 600 "$secrets_ssh_config"
-    bc_log_success "SSH config symlinked to secrets repository"
-
-    # Also set up SK SSH key handles
-    bc_setup_sk_ssh_handles
-
-    # Symlink smart-proxy so ProxyCommands work from GUI apps (e.g. VS Code)
-    # that launch ssh without the full shell environment ($BASH_CONFIG_DIR unset)
-    bc_setup_smart_proxy
-}
-
-# Symlink ssh-smart-proxy.sh into ~/.ssh/smart-proxy so ssh_config can reference
-# it via $HOME/.ssh/smart-proxy — available even from GUI apps (e.g. VS Code)
-# that launch ssh without the full shell environment ($BASH_CONFIG_DIR unset)
-bc_setup_smart_proxy() {
-    local ssh_dir="$HOME/.ssh"
-    local script="$BASH_CONFIG_DIR/scripts/ssh-smart-proxy.sh"
-    local target="$ssh_dir/smart-proxy"
-
-    if [[ ! -f "$script" ]]; then
-        bc_log_debug "Smart proxy script not found: $script"
-        return 0
-    fi
-
-    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$script" ]]; then
-        bc_log_debug "Smart proxy already linked: ~/.ssh/smart-proxy"
-        return 0
-    fi
-
-    ln -sfn "$script" "$target"
-    chmod 755 "$script"
-    bc_log_success "Smart proxy symlinked: ~/.ssh/smart-proxy → scripts/ssh-smart-proxy.sh"
-}
-
-# Symlink YubiKey SK SSH key handles from secrets into ~/.ssh/
-bc_setup_sk_ssh_handles() {
-    local ssh_dir="$HOME/.ssh"
-    local sk_dir="$BASH_CONFIG_DIR/secrets/sk_ssh_handles"
-
-    if [[ ! -d "$sk_dir" ]]; then
-        bc_log_debug "No SK SSH handles directory found: $sk_dir"
-        return 0
-    fi
-
-    mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
-
-    local linked=0
-    local skipped=0
-    for handle in "$sk_dir"/id_ed25519_sk_*; do
-        [[ -f "$handle" ]] || continue
-        local name
-        name="$(basename "$handle")"
-        local target="$ssh_dir/$name"
-
-        if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$handle" ]]; then
-            bc_log_debug "SK handle already linked: $name"
-            ((skipped++))
-            continue
-        fi
-
-        # Back up any existing non-symlink file
-        if [[ -f "$target" && ! -L "$target" ]]; then
-            mv "$target" "${target}.backup.$(date +%Y%m%d_%H%M%S)"
-            bc_log_info "Backed up existing $name"
-        fi
-
-        ln -sfn "$handle" "$target"
-        chmod 600 "$handle"
-        bc_log_debug "Linked SK handle: $name"
-        ((linked++))
-    done
-
-    if [[ $linked -gt 0 ]]; then
-        bc_log_success "Linked $linked SK SSH key handle(s) into ~/.ssh/"
-    elif [[ $skipped -gt 0 ]]; then
-        bc_log_info "All $skipped SK SSH key handle(s) already linked"
-    else
-        bc_log_debug "No SK SSH key handles found to link"
-    fi
-}
-
 # SSH config validation helper
 bc_check_ssh_config() {
     local silent="${1:-false}"
@@ -273,20 +149,22 @@ bc_ssh_workday_setup() {
     bc_ssh_agent_attach
     echo
     
-    # 2. Validate/setup SSH config
+    # 2. Confirm the SSH config is deployed (chezmoi owns it now)
     bc_log_info "📋 Checking SSH configuration..."
-    if ! bc_check_ssh_config silent; then
-        bc_log_info "Setting up SSH config..."
-        bc_setup_ssh_config || return 1
-    else
+    if bc_check_ssh_config silent; then
         bc_log_success "SSH config is ready"
+    else
+        bc_log_warn "SSH config missing — run 'chezmoi apply' to deploy it"
     fi
     echo
 
-    # 3. Ensure SK SSH key handles and smart-proxy are symlinked
+    # 3. Confirm SK key handles and smart-proxy are deployed (chezmoi owns them)
     bc_log_info "🔑 Checking YubiKey SK key handles..."
-    bc_setup_sk_ssh_handles
-    bc_setup_smart_proxy
+    if [[ -x "$HOME/.ssh/smart-proxy" ]]; then
+        bc_log_success "smart-proxy present"
+    else
+        bc_log_warn "smart-proxy missing — run 'chezmoi apply'"
+    fi
     echo
     
     # 4. Start master connection to bastion (optional — not reachable from inside Diamond)
@@ -394,24 +272,23 @@ bc_ssh_agent_attach() {
     bc_log_debug "Started new agent for ${shorthost%%.*} (PID: ${SSH_AGENT_PID:-?})"
 }
 
-# Install/enable the systemd --user unit that owns the machine's ssh-agent.
-# Mirrors bc_setup_atuin_daemon: symlink the repo unit, enable, verify.
+# Enable the systemd --user unit that owns the machine's ssh-agent. chezmoi
+# deploys the unit file to ~/.config/systemd/user/; this just reloads and
+# enables it. Idempotent — safe to re-run, and part of the post-apply steps
+# when migrating a machine to chezmoi.
 bc_setup_ssh_agent_service() {
-    local src="${BASH_CONFIG_DIR:-}/configs/systemd/user/ssh-agent.service"
-    local dest_dir="$HOME/.config/systemd/user"
+    local unit="$HOME/.config/systemd/user/ssh-agent.service"
 
     if ! command -v systemctl >/dev/null 2>&1; then
         bc_log_error "systemctl not found, this host does not use systemd"
         bc_log_info "bc_ssh_agent_attach will use the env-file fallback instead"
         return 1
     fi
-    if [[ ! -f "$src" ]]; then
-        bc_log_error "Unit file not found: $src"
+    if [[ ! -f "$unit" ]]; then
+        bc_log_error "Unit not deployed: $unit — run 'chezmoi apply' first"
         return 1
     fi
 
-    mkdir -p "$dest_dir"
-    ln -sf "$src" "$dest_dir/ssh-agent.service"
     systemctl --user daemon-reload
     systemctl --user enable --now ssh-agent.service >/dev/null 2>&1
 
@@ -611,12 +488,8 @@ bc_ssh_help() {
     echo -e "${BC_COLOR_BLUE}Connection Management:${BC_COLOR_RESET}"
     echo -e "  ${BC_COLOR_GREEN}bc_ssh_workday_setup${BC_COLOR_RESET}"
     echo -e "    Complete work day setup (config + master connections)"
-    echo -e "  ${BC_COLOR_GREEN}bc_setup_ssh_config${BC_COLOR_RESET}"
-    echo -e "    Set up SSH config symlink to secrets (also links SK handles)"
-    echo -e "  ${BC_COLOR_GREEN}bc_setup_sk_ssh_handles${BC_COLOR_RESET}"
-    echo -e "    Symlink YubiKey SK key handles from secrets into ~/.ssh/"
     echo -e "  ${BC_COLOR_GREEN}bc_check_ssh_config [silent]${BC_COLOR_RESET}"
-    echo -e "    Validate SSH config setup"
+    echo -e "    Check the chezmoi-deployed ~/.ssh/config is present"
     echo -e "  ${BC_COLOR_GREEN}bc_fix_ssh_permissions${BC_COLOR_RESET}"
     echo -e "    Fix ~/.ssh directory and file permissions to meet OpenSSH requirements"
     echo -e "  ${BC_COLOR_GREEN}bc_ssh_master_start <host>${BC_COLOR_RESET}"

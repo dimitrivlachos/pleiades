@@ -8,7 +8,7 @@
 #   - System info (bc_ff/ff)
 #   - Configuration management (bc_validate_config, bc_info)
 #   - Update management (bc_check_updates, bc_update_config)
-#   - Git configuration (bc_setup_git_config, bc_check_git_config)
+#   - Git configuration validation (bc_check_git_config)
 # ==============================================================================
 
 # ==============================================================================
@@ -145,7 +145,7 @@ bc_validate_config() {
   if command -v bc_check_git_config >/dev/null 2>&1 && bc_check_git_config silent >/dev/null 2>&1; then
     bc_log_success "Git config properly configured"
   else
-    bc_log_warn "Git config issues detected (run 'git-setup' to fix)"
+    bc_log_warn "Git config issues detected (run 'chezmoi apply' to redeploy ~/.gitconfig)"
   fi
 
   # Check CA certificates (gracefully skips when no certs dir exists)
@@ -239,43 +239,6 @@ bc_debug_toggle() {
 # GIT CONFIGURATION
 # ==============================================================================
 
-# Setup Git configuration from templates
-bc_setup_git_config() {
-    local git_config="$HOME/.gitconfig"
-    local backup_suffix=".backup.$(date +%Y%m%d_%H%M%S)"
-    
-    local specialisation="${BASH_SPECIALISATION:-}"
-    if [[ -z "$specialisation" ]]; then
-        bc_log_error "BASH_SPECIALISATION not set"
-        return 1
-    fi
-    
-    local template_config="$BASH_CONFIG_DIR/configs/gitconfig_$specialisation"
-    
-    bc_log_debug "Setting up Git config for specialisation: $specialisation"
-    bc_log_debug "Template: $template_config"
-    
-    if [[ ! -f "$template_config" ]]; then
-        bc_log_error "Git config template not found: $template_config"
-        return 1
-    fi
-    
-    # Backup existing config
-    if [[ -L "$git_config" ]]; then
-        local current_target=$(readlink "$git_config")
-        bc_log_info "Removing existing symlink (pointed to: $current_target)"
-        rm "$git_config"
-    elif [[ -f "$git_config" ]]; then
-        mv "$git_config" "${git_config}${backup_suffix}"
-        bc_log_info "Backed up existing Git config to: ${git_config}${backup_suffix}"
-    fi
-    
-    # Generate config with resolved paths
-    sed "s|\$BASH_CONFIG_DIR|$BASH_CONFIG_DIR|g" "$template_config" > "$git_config"
-    
-    bc_log_success "Git config generated for $specialisation"
-}
-
 # Validate Git configuration
 bc_check_git_config() {
     local silent="${1:-false}"
@@ -294,7 +257,9 @@ bc_check_git_config() {
         return 1
     fi
     
-    if ! grep -q "path = $BASH_CONFIG_DIR/configs/gitconfig_base" "$git_config"; then
+    # The chezmoi-managed ~/.gitconfig writes the include with a literal ~, so
+    # match on the tail rather than a $BASH_CONFIG_DIR-expanded absolute path.
+    if ! grep -q "configs/gitconfig_base" "$git_config"; then
         [[ "$silent" != "silent" ]] && bc_log_warn "Git config doesn't include base config with correct path"
         return 1
     fi
@@ -356,8 +321,8 @@ bc_help() {
             echo -e "${BC_COLOR_CYAN}🔧 Git Configuration:${BC_COLOR_RESET}"
             echo
             echo -e "${BC_COLOR_BLUE}Commands:${BC_COLOR_RESET}"
-            echo "  git-setup         - Generate ~/.gitconfig from templates"
             echo "  bc_check_git_config - Validate git configuration"
+            echo "  (~/.gitconfig is deployed by chezmoi; run 'chezmoi apply' to refresh)"
             echo
             echo -e "${BC_COLOR_BLUE}Files:${BC_COLOR_RESET}"
             echo "  configs/gitconfig_base     - Shared aliases and settings"
