@@ -47,11 +47,11 @@ bc_setup_certs() {
     return 1
   fi
 
-  local certs_dir="$BASH_CONFIG_DIR/secrets/certs"
+  local certs_dir="$BASH_CONFIG_DIR/certs"
 
   if [[ ! -d "$certs_dir" ]]; then
     bc_log_error "Certs directory not found: $certs_dir"
-    bc_log_info "Ensure the secrets submodule is initialised: git submodule update --init"
+    bc_log_info "Ensure chezmoi has deployed the certs: chezmoi apply"
     return 1
   fi
 
@@ -109,7 +109,7 @@ bc_setup_certs() {
 # so this check is safe to run on non-frostpaw specialisations.
 bc_check_certs() {
   local silent="${1:-}"
-  local certs_dir="$BASH_CONFIG_DIR/secrets/certs"
+  local certs_dir="$BASH_CONFIG_DIR/certs"
 
   if [[ ! -d "$certs_dir" ]]; then
     return 0
