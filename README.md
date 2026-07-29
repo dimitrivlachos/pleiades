@@ -1,97 +1,190 @@
 # 🌀 bash-config
 
-Modular, secure, and portable Bash configuration system with environment-specific customisations for home and work setups.
+Modular, secure, and portable Bash configuration, managed with
+[chezmoi](https://www.chezmoi.io/) and specialised per machine.
 
 This repo is designed to be:
 
 - 🧩 **Modular** – clean separation of shared and machine-specific logic
-- 🛡️ **Secure** – sensitive details are kept in a separate `secrets/` file (git-ignored)
-- 🧼 **Maintainable** – easily extensible as your setup evolves
-- 🌍 **Portable** – supports multiple environments via specialisations
+- 🛡️ **Secure** – secrets are age-encrypted in the source and decrypted
+  only on the target machine, so the repo can stay public
+- 🧼 **Maintainable** – one `chezmoi apply` deploys everything, and
+  `chezmoi diff` shows the change first
+- 🌍 **Portable** – one source, many machines, via a per-machine
+  specialisation value
 
 ---
 
 ## 📁 Structure
+
+chezmoi treats `home/` as its source root (via `.chezmoiroot`), and the
+`dot_` / `private_` / `encrypted_` prefixes map to real dotfiles on
+apply.
+
 ```
 bash-config/
-├── bashrc_core         # Main orchestrator script (symlinked as ~/.bashrc_core)
-├── bash_aliases        # Shared aliases across all systems
-├── bash_prompt         # Prompt appearance and toggles
-├── bash_exports        # Shared environment settings
-├── bash_tools          # Utility shell functions (e.g. mae, Git config setup)
-├── bash_update         # Cross-platform update system (update / cleanup / full-update)
-├── install.sh          # Setup helper script
-├── configs/
-│   ├── gitconfig_base          # Shared Git aliases and settings
-│   ├── gitconfig_diamond       # Diamond-specific Git config template
-│   ├── gitconfig_frostpaw      # Frostpaw-specific Git config template
-│   └── fastfetch_diamond.jsonc # Diamond fastfetch layout
-├── secrets/
-│   ├── bash_secrets.sh         # Local-only, untracked file for credentials and paths
-│   ├── gitconfig_user_public   # Git user config for public account (untracked)
-│   └── gitconfig_user_private  # Git user config for private account (untracked)
-└── specialisations/
-    ├── bashrc_frostpaw # Home setup (Arch Linux, modern CLI tools, yay/paru updates)
-    └── bashrc_diamond  # Work setup (modules, pixi, SSH, hostname mapping)
+├── .chezmoiroot                    # points chezmoi at home/
+├── home/
+│   ├── .chezmoi.toml.tmpl          # prompts specialisation, sets age
+│   ├── .chezmoiexternal.toml       # bash-preexec + tmux plugins (fetched)
+│   ├── modify_dot_bashrc.tmpl      # refreshes the managed ~/.bashrc block
+│   ├── dot_gitconfig.tmpl          # ~/.gitconfig, identity by specialisation
+│   ├── dot_config/bash-config/     # the modules -> ~/.config/bash-config/
+│   │   ├── bashrc_core             # orchestrator sourced by ~/.bashrc
+│   │   ├── bash_aliases, bash_ssh, bash_tools, ...
+│   │   ├── configs/gitconfig_base  # shared git aliases/core/colours
+│   │   └── encrypted_*.age         # secrets (bash_secrets, git identities)
+│   ├── private_dot_ssh/            # ssh config + SK handles (encrypted)
+│   └── dot_config/systemd/user/    # atuin-daemon + ssh-agent units
+└── docs/
+    ├── chezmoi_migration.md        # the migration plan
+    └── migrating_to_chezmoi.md     # per-machine cutover runbook
 ```
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation (new machine)
 
-### 1. Clone the repo
+You need the age identity (`key.txt`, kept in Vaultwarden) to decrypt
+secrets. chezmoi has age built in, so no separate `age` binary is
+required.
+
+### 1. Install chezmoi and clone the source
+
 ```bash
-git clone git@github.com:dimitrivlachos/bash-config.git ~/Documents/bash-config
-cd ~/Documents/bash-config
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/bash-config
 ```
 
-### 2. Run the installer
+This installs chezmoi, clones the source, prompts for the machine
+specialisation, and writes `~/.config/chezmoi/chezmoi.toml`.
+
+### 2. Drop the age key in place
+
 ```bash
-./install.sh
+install -m 600 -D /path/to/key.txt ~/.config/chezmoi/key.txt
 ```
 
-This will:
-- Ask you which specialisation to enable (frostpaw or diamond)
-- Link bashrc_core to ~/.bashrc_core
-- Append this to your ~/.bashrc:
-    ```bash
-    export BASH_SPECIALISATION="frostpaw"
-    source ~/.bashrc_core
-    ```
-- Create a placeholder `secrets/bash_secrets.sh` if it doesn't exist
-- Install **bash-preexec** (required for atuin history recording — see [Atuin History](#-atuin-history))
+### 3. Preview and apply
 
-### 3. Set up Git configuration
 ```bash
-git-setup
+chezmoi diff
+chezmoi apply
+exec bash -l
 ```
 
-This will generate your `~/.gitconfig` with all aliases and settings. See [Git Configuration](#-git-configuration) below for details.
+`apply` deploys the modules, decrypts the secrets, and adds this block
+to `~/.bashrc`:
+
+```bash
+# >>> bash-config initialize >>>
+export BASH_SPECIALISATION="frostpaw"
+source "$HOME/.config/bash-config/bashrc_core"
+# <<< bash-config initialize <<<
+```
+
+A few things chezmoi deploys but does not activate (systemd units, the
+homelab CA) have one-shot enable steps; see the runbook below.
+
+### Migrating an existing machine
+
+If the machine is currently on the old `install.sh` layout (symlinks
+plus a `secrets` submodule), follow the cutover runbook instead:
+[`docs/migrating_to_chezmoi.md`](docs/migrating_to_chezmoi.md). It
+covers clearing the old symlinks, enabling the systemd units, and the
+SSH key rename.
+
+---
+
+## 🔄 Updating
+
+```bash
+chezmoi update          # pull the source, then apply
+```
+
+or, equivalently, the wrappers that also show you what is coming:
+
+```bash
+bc_update_config        # show pending source changes
+bc_update_config update # apply them (calls chezmoi update)
+```
+
+A daily login check nudges you when the source is behind upstream.
 
 ---
 
 ## 🧠 Specialisations
-The following specialisation values are supported:
+
+The specialisation is chosen at `chezmoi init` and stored in
+`~/.config/chezmoi/chezmoi.toml`. It drives both the templates and the
+`BASH_SPECIALISATION` export.
+
 | Name | Description |
 | ---- | ----------- |
 | frostpaw | Home setup (Arch Linux, modern CLI tools, yay/paru updates) |
 | diamond | Work setup (CUDA/CMake modules, pixi tools, SSH agent, hostname mapping) |
+| asteria | Headless personal server |
 
-Set the desired specialisation in `~/.bashrc`:
-```bash
-export BASH_SPECIALISATION="{specialisation}"
-```
-This variable is read by `bashrc_core` to load the correct specialisation file.
+To change a machine's specialisation, re-run `chezmoi init` or edit the
+value in `~/.config/chezmoi/chezmoi.toml`, then `chezmoi apply`.
 
 ---
 
-## � Pixi Package Manager (Diamond)
+## 🔑 Secrets 🔐
 
-[Pixi](https://prefix.dev/docs/pixi) is used on Diamond systems to manage user-space CLI tools without requiring root, keeping everything on the science volume.
+Secrets are age-encrypted in the source (the `encrypted_*.age` files)
+and decrypted on apply into `~/.config/bash-config/`:
 
-### Configuration
+- `bash_secrets.sh` – usernames, key paths, tokens
+- `gitconfig_user_public` / `gitconfig_user_private` – git identities
+- `~/.ssh/config` and the SK key handles
 
-The Diamond specialisation automatically sets up pixi when `DIAMOND_USERNAME` is defined in `secrets/bash_secrets.sh`:
+The single age identity lives at `~/.config/chezmoi/key.txt` on each
+machine (copied out-of-band from Vaultwarden, never committed). Because
+only ciphertext and generic tooling are in the repo, it can stay public.
+
+To edit a secret:
+
+```bash
+chezmoi edit ~/.config/bash-config/bash_secrets.sh   # decrypts, re-encrypts on save
+chezmoi apply
+```
+
+---
+
+## 🔧 Git Configuration
+
+`~/.gitconfig` is a chezmoi template (`dot_gitconfig.tmpl`). It includes
+the shared base config and picks an identity:
+
+- **diamond**: always the public (work) identity.
+- **personal machines**: the identity is chosen by the account the
+  repo's remote points at - `git@github.com-d:...` uses the public
+  account, `git@github.com-s:...` the private one.
+
+The base config (`configs/gitconfig_base`) carries 40+ aliases and
+sensible core/pull/push defaults. There is no `git-setup` step any more;
+`chezmoi apply` deploys `~/.gitconfig`. Validate with
+`bc_check_git_config`.
+
+### Using Git aliases
+
+```bash
+git aliases        # list all aliases
+git s              # short status with branch info
+git cm "message"   # commit with message
+git l              # compact log with graph
+git undo           # undo last commit (keeps changes)
+```
+
+---
+
+## 🐍 Pixi Package Manager (Diamond)
+
+[Pixi](https://prefix.dev/docs/pixi) manages user-space CLI tools on
+Diamond without root, keeping everything on the science volume.
+
+The Diamond specialisation sets pixi up when `DIAMOND_USERNAME` is
+defined in `bash_secrets.sh`:
 
 ```bash
 export PIXI_HOME="/dls/science/users/$DIAMOND_USERNAME/.pixi"
@@ -99,217 +192,50 @@ export PIXI_CACHE_DIR="$PIXI_HOME/cache"
 # $PIXI_HOME/bin is added to PATH automatically if the directory exists
 ```
 
-### Installing tools
-
-```bash
-pixi global install htop btop nvtop ripgrep fd bat eza fastfetch k9s tmux
-```
-
-### Modern CLI aliases
-
-The Diamond specialisation overrides several standard commands with modern alternatives installed via pixi:
-
-| Alias | Replaces | Tool | Description |
-| ----- | -------- | ---- | ----------- |
-| `ls` | `ls` | eza | Coloured listing with icons |
-| `ll` | — | eza | Long listing with Git status |
-| `lt` | — | eza | Tree view (2 levels) |
-| `cat` | `cat` | bat | Syntax-highlighted pager |
-| `grep` | `grep` | ripgrep | Fast regex search |
-| `find` | `find` | fd | Simpler, faster find |
-
-> **Note:** `find` and `grep` have different flag interfaces to their GNU equivalents. The aliases only apply interactively — scripts are unaffected.
-
-### Updates
-
-Pixi self-updates are handled by the `update` / `full-update` commands alongside system packages. Only the script-installed binary at `$PIXI_HOME/bin/pixi` is auto-updated; a system-managed pixi is left to the system package manager.
-
-### Diamond environment reference
-
-Run `diamond-help` (or `dh`) in any Diamond shell for a full command reference covering navigation, build aliases, diagnostics, and pixi tool details.
+Install tools with `pixi global install ...`. Modern CLI aliases
+(`eza`, `bat`, `ripgrep`, `fd`) apply interactively only, so scripts are
+unaffected. Run `diamond-help` (or `dh`) for the full Diamond reference.
 
 ---
 
-## �🔑 Secrets 🔐
-Sensitive values are stored in:
+## 📜 Atuin History
+
+[Atuin](https://github.com/atuinsh/atuin) is the primary history
+backend, providing cross-machine sync, per-command metadata, and the
+Ctrl+R search UI.
+
+Atuin relies on [bash-preexec](https://github.com/rcaloras/bash-preexec)
+to hook bash's `preexec`/`precmd` lifecycle. **Without it, atuin records
+nothing.** It is fetched as a chezmoi external into
+`~/.config/bash-config/bash-preexec/`; verify with:
+
 ```bash
-bash-config/secrets/bash_secrets.sh
-```
-This file is *ignored by Git* and sourced by `bashrc_core`. It contains environment variables for:
-- Usernames
-- Key paths
-
-This allows a file to dynamically set the correct values such as:
-```bash
-/dls/science/users/$USER/...
+bc_check_bash_preexec   # installed and active?
+bc_verify_atuin         # sync server connectivity (frostpaw)
 ```
 
-### Git User Configuration
-Git user details are also stored in secrets to keep your email addresses private:
-
-**For Frostpaw (dual GitHub accounts):**
-Create these files in `secrets/`:
-
-```ini
-# secrets/gitconfig_user_public (for github.com-d)
-[user]
-    name = Your Name
-    email = your.work@email.com
-```
-
-```ini
-# secrets/gitconfig_user_private (for github.com-s)
-[user]
-    name = Your Name
-    email = your.personal@email.com
-```
-
-**For Diamond:**
-Only `secrets/gitconfig_user_public` is needed with your work credentials.
-
----
-
-## 🔧 Git Configuration
-
-This bash-config includes a comprehensive Git configuration system with:
-- 40+ useful aliases for common Git operations
-- Sensible defaults for core, pull, push, and merge behavior
-- Automatic user switching based on remote URL (Frostpaw only)
-- Cross-platform line ending handling
-
-### Setup
-
-Run the setup command to generate your `~/.gitconfig`:
-```bash
-git-setup
-```
-
-This reads the template files in `configs/` and generates `~/.gitconfig` with absolute paths resolved for your system.
-
-### How It Works
-
-**Base Configuration** (`configs/gitconfig_base`)
-Contains all shared aliases and settings used across all machines:
-- Status, commit, branch, and log shortcuts
-- Editor, pager, and color settings
-- Merge and diff configurations
-
-**Specialisation Templates** (`configs/gitconfig_{diamond,frostpaw}`)
-- **Diamond**: Simple setup that includes base config + public user credentials
-- **Frostpaw**: Advanced setup with conditional includes based on Git remote URLs
-  - Repos cloned with `git@github.com-d:...` use public account
-  - Repos cloned with `git@github.com-s:...` use private account
-
-**User Credentials** (`secrets/gitconfig_user_{public,private}`)
-Contain your name and email, kept in the gitignored `secrets/` directory.
-
-### Using Git Aliases
-
-View all available aliases:
-```bash
-git aliases
-```
-
-Some useful examples:
-```bash
-# Status shortcuts
-git s              # Short status with branch info
-git st             # Full status
-
-# Commit shortcuts
-git cm "message"   # Commit with message
-git ca             # Amend last commit
-git can            # Amend without changing message
-
-# Branch management
-git b              # List branches
-git ba             # List all branches (including remote)
-git bd branch-name # Delete branch (safe)
-
-# Beautiful logs
-git l              # Compact log with graph
-git lg             # Colorful detailed log with graph
-
-# Quick operations
-git unstage file   # Unstage a file
-git undo           # Undo last commit (keeps changes)
-git discard file   # Discard changes to file
-```
-
-### Configuration Highlights
-
-**Core Settings:**
-- `editor = vim` - Uses Vim for commit messages
-- `autocrlf = input` - Handles cross-platform line endings (converts CRLF→LF on commit)
-- `pager = less -FRX` - Improved pager settings (quits if one screen, shows colors, doesn't clear)
-
-**Behavior:**
-- `push.autoSetupRemote = true` - No need for `-u` flag when pushing new branches
-- `pull.rebase = false` - Uses merge strategy (creates merge commits)
-- `init.defaultBranch = main` - New repos use `main` instead of `master`
-
-**Better Diffs & Merges:**
-- `merge.conflictstyle = diff3` - Shows 3-way conflict markers (yours | base | theirs)
-- `diff.colorMoved = default` - Highlights moved code blocks differently
-
-### Updating Configuration
-
-If you modify the config templates in `configs/`, regenerate your `~/.gitconfig`:
-```bash
-git-setup
-```
-
-The system will backup your existing config before generating a new one.
-
----
-
-## � Atuin History
-
-[Atuin](https://github.com/atuinsh/atuin) is used as the primary shell history backend, providing cross-machine sync, per-command metadata (exit code, duration, host), and an interactive Ctrl+R search UI.
-
-### Dependencies
-
-Atuin relies on [bash-preexec](https://github.com/rcaloras/bash-preexec) to hook into bash's `preexec`/`precmd` lifecycle. **Without it, atuin will not record any commands** — the Ctrl+R search UI still works, but nothing new is added to history.
-
-The installer handles this automatically. To install manually:
-
-| Distro | Command |
-| ------ | ------- |
-| Arch Linux | `sudo pacman -S bash-preexec` |
-| Ubuntu / Debian | `sudo apt install bash-preexec` |
-| RHEL / other | `curl -fsSL https://raw.githubusercontent.com/rcaloras/bash-preexec/master/bash-preexec.sh -o ~/.bash-preexec.sh` |
-
-### Verifying the setup
-
-Check that bash-preexec is loaded and atuin is recording correctly:
-```bash
-bc_check_bash_preexec   # Check bash-preexec is installed and active
-bc_verify_atuin         # Check atuin sync server connectivity (frostpaw only)
-```
-
-If commands are not appearing in atuin search, run `bc_check_bash_preexec` — it will tell you whether bash-preexec is missing, installed-but-not-loaded, or fully active.
-
-### How recording works
+Recording flow:
 
 ```
 bash runs a command
-  → bash-preexec fires preexec_functions[] → __atuin_preexec → atuin history start
+  → bash-preexec fires preexec → __atuin_preexec → atuin history start
   → command executes
-  → bash-preexec fires precmd_functions[]  → __atuin_precmd  → atuin history end
+  → bash-preexec fires precmd  → __atuin_precmd  → atuin history end
 ```
 
-The bash HISTFILE is still maintained as a passive text backup via `history -a` in `PROMPT_COMMAND`, so it remains intact if atuin ever becomes unavailable.
+The bash `HISTFILE` is still maintained as a passive text backup via
+`history -a`, so it survives if atuin is ever unavailable.
 
 ---
 
-## �💡 Prompt Toggles
-These commands let you customise your prompt in real-time:
+## 💡 Prompt Toggles
+
 | Command | Description |
 | ------- | ----------- |
 | `tgit` | Toggle Git branch display |
-| `tdir` | Toggle between long `\W` and short `\w` directory display |
-| `tem` | Toggle emoji usage in prompt |
-| `ph` | Show all available prompt helpers |
+| `tdir` | Toggle long `\W` / short `\w` directory display |
+| `tem` | Toggle emoji in prompt |
+| `ph` | Show all prompt helpers |
 | `rp` | Reset prompt to default |
 
-These are available globally on all systems.
+Available on all systems.
