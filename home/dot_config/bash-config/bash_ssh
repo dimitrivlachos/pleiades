@@ -158,29 +158,17 @@ bc_setup_sk_ssh_handles() {
 bc_check_ssh_config() {
     local silent="${1:-false}"
     local config_file="$HOME/.ssh/config"
-    local secrets_ssh_config="$BASH_CONFIG_DIR/secrets/ssh_config"
-    
-    bc_log_debug "Checking SSH config: $config_file -> $secrets_ssh_config"
-    
-    if [[ ! -f "$secrets_ssh_config" ]]; then
-        [[ "$silent" != "silent" ]] && bc_log_error "SSH config not found in secrets: $secrets_ssh_config"
+
+    # chezmoi deploys ~/.ssh/config directly (decrypted from the source), so
+    # this just confirms the file is present and non-empty. The old model,
+    # where the config was a symlink into the secrets submodule, is gone.
+    if [[ ! -s "$config_file" ]]; then
+        [[ "$silent" != "silent" ]] && bc_log_warn "SSH config missing or empty: $config_file (run 'chezmoi apply')"
+        bc_log_debug "SSH config not present: $config_file"
         return 1
     fi
-    
-    if [[ ! -L "$config_file" ]]; then
-        [[ "$silent" != "silent" ]] && bc_log_warn "SSH config is not a symlink to secrets"
-        bc_log_debug "Config file is not a symlink: $config_file"
-        return 1
-    fi
-    
-    local target=$(readlink "$config_file")
-    if [[ "$target" != "$secrets_ssh_config" ]]; then
-        [[ "$silent" != "silent" ]] && bc_log_warn "SSH config symlink points to wrong location: $target"
-        bc_log_debug "Symlink target mismatch: expected $secrets_ssh_config, got $target"
-        return 1
-    fi
-    
-    [[ "$silent" != "silent" ]] && bc_log_success "SSH config correctly symlinked to secrets"
+
+    [[ "$silent" != "silent" ]] && bc_log_success "SSH config present: $config_file"
     bc_log_debug "SSH config validation passed"
     return 0
 }
