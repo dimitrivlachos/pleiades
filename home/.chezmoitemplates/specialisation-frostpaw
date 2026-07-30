@@ -29,15 +29,9 @@ tsup() {
 # ------------------------------------------------------------------------------
 # Fastfetch Configuration
 # ------------------------------------------------------------------------------
-# Not exporting FASTFETCH_BIN as the binary is already in the PATH
-# Pick an ARM-friendly config on aarch64, otherwise use the default Frostpaw one.
-if [ -z "${FASTFETCH_CONFIG:-}" ]; then
-  if [ "$(uname -m)" = "aarch64" ]; then
-    export FASTFETCH_CONFIG="$BASH_CONFIG_DIR/configs/fastfetch_spark.jsonc"
-  else
-    export FASTFETCH_CONFIG="$BASH_CONFIG_DIR/configs/fastfetch_frostpaw.jsonc"
-  fi
-fi
+# The fastfetch config is deployed by chezmoi to
+# ~/.config/fastfetch/config.jsonc, templated per machine and arch
+# (arm64 gets the spark readout), so no env override is needed here.
 
 # ------------------------------------------------------------------------------
 # Mamba Compatibility

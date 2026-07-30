@@ -80,6 +80,8 @@ rm -f ~/.bashrc_core
 [ -L ~/.config/tmux ]      && rm ~/.config/tmux
 [ -L ~/.aider.conf.yml ]   && rm ~/.aider.conf.yml
 [ -L ~/.ssh/config ]       && rm ~/.ssh/config
+# atuin/fastfetch now live at their XDG homes; drop any old symlink there:
+[ -L ~/.config/atuin/config.toml ] && rm ~/.config/atuin/config.toml
 # old SK key-handle symlinks, if any:
 find ~/.ssh -maxdepth 1 -type l -name 'id_ed25519_sk_*' -delete
 ```

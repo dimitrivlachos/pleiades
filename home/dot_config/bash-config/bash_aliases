@@ -3,7 +3,8 @@
 # SHARED ALIASES
 # ==============================================================================
 # Common aliases available across all systems/specialisations.
-# Machine-specific aliases should be defined in specialisations/bashrc_*
+# Machine-specific aliases go in the matching
+# home/.chezmoitemplates/specialisation-* partial.
 #
 # Note: Prompt toggle functions (tgit, tvenv, tdir, tem, ph) are defined
 # in bash_prompt and are available directly as commands - no aliases needed.

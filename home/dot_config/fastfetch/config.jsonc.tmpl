@@ -1,0 +1,21 @@
+{{/*
+  Rendered by chezmoi to ~/.config/fastfetch/config.jsonc (fastfetch's
+  default path, so no --config flag or FASTFETCH_CONFIG env var is needed).
+  Selection is per-machine at apply time, dispatching to one
+  .chezmoitemplates/fastfetch-* partial by specialisation, and by arch
+  within frostpaw (arm64 -> spark). To change a machine's readout, edit
+  the matching partial.
+*/ -}}
+{{ if eq .specialisation "frostpaw" -}}
+{{ if eq .chezmoi.arch "arm64" -}}
+{{ template "fastfetch-spark" . }}
+{{- else -}}
+{{ template "fastfetch-frostpaw" . }}
+{{- end }}
+{{- else if eq .specialisation "diamond" -}}
+{{ template "fastfetch-diamond" . }}
+{{- else if eq .specialisation "asteria" -}}
+{{ template "fastfetch-asteria" . }}
+{{- else -}}
+{{ template "fastfetch-default" . }}
+{{- end }}

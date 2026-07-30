@@ -55,17 +55,14 @@ mae() {
 # SYSTEM INFORMATION
 # ==============================================================================
 
-# Fastfetch wrapper (specialisations can override FASTFETCH_BIN and FASTFETCH_CONFIG)
+# Fastfetch wrapper. chezmoi deploys the per-machine config to
+# ~/.config/fastfetch/config.jsonc (fastfetch's default path), so no --config
+# override is needed. FASTFETCH_BIN can still point at a custom build.
 bc_ff() {
   local ff_bin="${FASTFETCH_BIN:-fastfetch}"
-  local ff_config="${FASTFETCH_CONFIG:-}"
 
   if command -v "$ff_bin" &>/dev/null; then
-    if [[ -n "$ff_config" && -f "$ff_config" ]]; then
-      "$ff_bin" --config "$ff_config" 2>/dev/null
-    else
-      "$ff_bin" 2>/dev/null
-    fi
+    "$ff_bin" 2>/dev/null
   else
     bc_log_error "[fastfetch] binary not found: $ff_bin"
     return 1
@@ -95,7 +92,7 @@ bc_validate_config() {
   
   # Check specialization file
   if [[ -n "${BASH_SPECIALISATION:-}" ]]; then
-    local spec_file="$BASH_CONFIG_DIR/specialisations/bashrc_$BASH_SPECIALISATION"
+    local spec_file="$BASH_CONFIG_DIR/specialisation.sh"
     if [[ -f "$spec_file" ]]; then
       bc_log_success "Specialisation file found: $spec_file"
     else
@@ -106,14 +103,12 @@ bc_validate_config() {
     bc_log_info "No specialisation set"
   fi
   
-  # Check fastfetch config
-  if [[ -n "${FASTFETCH_CONFIG:-}" ]]; then
-    if [[ -f "$FASTFETCH_CONFIG" ]]; then
-      bc_log_success "Fastfetch config found: $FASTFETCH_CONFIG"
-    else
-      bc_log_error "Fastfetch config missing: $FASTFETCH_CONFIG"
-      ((issues++))
-    fi
+  # Check fastfetch config (chezmoi deploys it to the XDG default path)
+  local ff_config="$HOME/.config/fastfetch/config.jsonc"
+  if [[ -f "$ff_config" ]]; then
+    bc_log_success "Fastfetch config found: $ff_config"
+  else
+    bc_log_warn "Fastfetch config missing: $ff_config (run 'chezmoi apply')"
   fi
   
   # Check fastfetch binary
@@ -127,7 +122,7 @@ bc_validate_config() {
   fi
   
   # Check secrets file
-  local secrets_file="$BASH_CONFIG_DIR/secrets/bash_secrets.sh"
+  local secrets_file="$BASH_CONFIG_DIR/bash_secrets.sh"
   if [[ -f "$secrets_file" ]]; then
     bc_log_success "Secrets file found"
   else
@@ -151,7 +146,7 @@ bc_validate_config() {
   # Check CA certificates (gracefully skips when no certs dir exists)
   if command -v bc_check_certs >/dev/null 2>&1; then
     if bc_check_certs silent; then
-      [[ -d "${BASH_CONFIG_DIR:-}/secrets/certs" ]] && bc_log_success "CA certs installed"
+      [[ -d "${BASH_CONFIG_DIR:-}/certs" ]] && bc_log_success "CA certs installed"
     else
       bc_log_warn "CA cert(s) missing or outdated (run 'bc_setup_certs')"
       ((issues++))
@@ -198,7 +193,6 @@ bc_info() {
   echo -e "  ${BC_COLOR_BLUE}Host:${BC_COLOR_RESET} $(hostname)"
   echo -e "  ${BC_COLOR_BLUE}User:${BC_COLOR_RESET} $USER"
   [[ -n "${FASTFETCH_BIN:-}" ]] && echo -e "  ${BC_COLOR_BLUE}Fastfetch:${BC_COLOR_RESET} $FASTFETCH_BIN"
-  [[ -n "${FASTFETCH_CONFIG:-}" ]] && echo -e "  ${BC_COLOR_BLUE}Fastfetch Config:${BC_COLOR_RESET} $FASTFETCH_CONFIG"
   
   # SSH agent status
   if ssh-add -l >/dev/null 2>&1; then
@@ -243,7 +237,7 @@ bc_debug_toggle() {
 bc_check_git_config() {
     local silent="${1:-false}"
     local git_config="$HOME/.gitconfig"
-    local base_config="$BASH_CONFIG_DIR/configs/gitconfig_base"
+    local base_config="$BASH_CONFIG_DIR/gitconfig_base"
     
     bc_log_debug "Checking Git config: $git_config"
     
@@ -259,7 +253,7 @@ bc_check_git_config() {
     
     # The chezmoi-managed ~/.gitconfig writes the include with a literal ~, so
     # match on the tail rather than a $BASH_CONFIG_DIR-expanded absolute path.
-    if ! grep -q "configs/gitconfig_base" "$git_config"; then
+    if ! grep -q "bash-config/gitconfig_base" "$git_config"; then
         [[ "$silent" != "silent" ]] && bc_log_warn "Git config doesn't include base config with correct path"
         return 1
     fi
@@ -325,9 +319,8 @@ bc_help() {
             echo "  (~/.gitconfig is deployed by chezmoi; run 'chezmoi apply' to refresh)"
             echo
             echo -e "${BC_COLOR_BLUE}Files:${BC_COLOR_RESET}"
-            echo "  configs/gitconfig_base     - Shared aliases and settings"
-            echo "  configs/gitconfig_<spec>   - Specialisation templates"
-            echo "  secrets/gitconfig_user_*   - User credentials (gitignored)"
+            echo "  gitconfig_base                  - Shared aliases and settings"
+            echo "  gitconfig_user_{public,private} - Encrypted identities (chezmoi)"
             echo
             echo -e "${BC_COLOR_GRAY}Run 'git aliases' to see all available git shortcuts${BC_COLOR_RESET}"
             ;;

@@ -27,15 +27,21 @@ bash-config/
 ├── home/
 │   ├── .chezmoi.toml.tmpl          # prompts specialisation, sets age
 │   ├── .chezmoiexternal.toml       # bash-preexec + tmux plugins (fetched)
+│   ├── .chezmoitemplates/          # specialisation-*, fastfetch-*, atuin-* partials
 │   ├── modify_dot_bashrc.tmpl      # refreshes the managed ~/.bashrc block
 │   ├── dot_gitconfig.tmpl          # ~/.gitconfig, identity by specialisation
-│   ├── dot_config/bash-config/     # the modules -> ~/.config/bash-config/
-│   │   ├── bashrc_core             # orchestrator sourced by ~/.bashrc
-│   │   ├── bash_aliases, bash_ssh, bash_tools, ...
-│   │   ├── configs/gitconfig_base  # shared git aliases/core/colours
-│   │   └── encrypted_*.age         # secrets (bash_secrets, git identities)
-│   ├── private_dot_ssh/            # ssh config + SK handles (encrypted)
-│   └── dot_config/systemd/user/    # atuin-daemon + ssh-agent units
+│   ├── dot_config/
+│   │   ├── bash-config/            # the modules -> ~/.config/bash-config/
+│   │   │   ├── bashrc_core         # orchestrator sourced by ~/.bashrc
+│   │   │   ├── bash_aliases, bash_ssh, bash_tools, ...
+│   │   │   ├── specialisation.sh.tmpl  # renders this machine's partial
+│   │   │   ├── gitconfig_base      # shared git aliases/core/colours
+│   │   │   └── encrypted_*.age     # secrets (bash_secrets, git identities)
+│   │   ├── fastfetch/config.jsonc.tmpl  # -> ~/.config/fastfetch/ (per machine+arch)
+│   │   ├── atuin/config.toml.tmpl       # -> ~/.config/atuin/ (homelab or diamond)
+│   │   ├── tmux/tmux.conf          # -> ~/.config/tmux/
+│   │   └── systemd/user/           # atuin-daemon + ssh-agent units
+│   └── private_dot_ssh/            # ssh config + SK handles (encrypted)
 └── docs/
     ├── chezmoi_migration.md        # the migration plan
     └── migrating_to_chezmoi.md     # per-machine cutover runbook
@@ -161,7 +167,7 @@ the shared base config and picks an identity:
   repo's remote points at - `git@github.com-d:...` uses the public
   account, `git@github.com-s:...` the private one.
 
-The base config (`configs/gitconfig_base`) carries 40+ aliases and
+The base config (`gitconfig_base`) carries 40+ aliases and
 sensible core/pull/push defaults. There is no `git-setup` step any more;
 `chezmoi apply` deploys `~/.gitconfig`. Validate with
 `bc_check_git_config`.

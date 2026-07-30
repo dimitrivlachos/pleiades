@@ -1,0 +1,12 @@
+{{/*
+  Rendered by chezmoi to ~/.config/atuin/config.toml (atuin's default
+  path, so no ATUIN_CONFIG_DIR env var is needed). diamond gets its own
+  config (different sync_address, no daemon on shared HPC nodes);
+  everything else gets the homelab config. Edit the matching
+  .chezmoitemplates/atuin-* partial to change a machine's atuin setup.
+*/ -}}
+{{ if eq .specialisation "diamond" -}}
+{{ template "atuin-diamond" . }}
+{{- else -}}
+{{ template "atuin-homelab" . }}
+{{- end }}
