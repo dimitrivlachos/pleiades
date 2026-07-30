@@ -73,6 +73,8 @@ bc_source_if_exists "$BASH_CONFIG_DIR/bash_history" "History management"
 bc_source_if_exists "$BASH_CONFIG_DIR/bash_update" "Update utilities"
 bc_source_if_exists "$BASH_CONFIG_DIR/bash_config_update" "Config self-update"
 bc_source_if_exists "$BASH_CONFIG_DIR/bash_project" "Project workspace management"
+# Sourced last: the config doctor orchestrates primitives from every module above.
+bc_source_if_exists "$BASH_CONFIG_DIR/bash_doctor" "Config doctor"
 
 # ==============================================================================
 # SPECIALISATION LOADER

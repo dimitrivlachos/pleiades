@@ -104,6 +104,11 @@ alias maeb='mae && cd build/'        # Activate local env and enter build dir
 alias rp='set_prompt'                # Reset/refresh prompt
 
 # ------------------------------------------------------------------------------
+# Diagnostics
+# ------------------------------------------------------------------------------
+alias doctor='bc_doctor'             # Check config health (add --fix to repair)
+
+# ------------------------------------------------------------------------------
 # Kubernetes
 # ------------------------------------------------------------------------------
 alias k='kubectl'
