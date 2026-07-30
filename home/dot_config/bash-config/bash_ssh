@@ -60,11 +60,6 @@ bc_fix_ssh_permissions() {
     chmod 600 "$ssh_dir"/authorized_keys 2>/dev/null  # Authorised keys: owner read/write only
     chmod 600 "$ssh_dir"/known_hosts 2>/dev/null  # Known hosts: owner read/write only
 
-    # Also fix permissions on the secrets config (symlink target)
-    if [[ -n "$BASH_CONFIG_DIR" && -f "$BASH_CONFIG_DIR/secrets/ssh_config" ]]; then
-        chmod 600 "$BASH_CONFIG_DIR/secrets/ssh_config"  # Symlink target must also be 600
-    fi
-
     bc_log_success "SSH permissions fixed"
 }
 

@@ -105,41 +105,25 @@ bc_history_init() {
   fi
 }
 
-# Verify that ATUIN_CONFIG_DIR points to the repo-managed config and that
-# the config file exists.  Removes any stale symlink left from the old
-# symlink-based setup.  Frostpaw only.
+# Sanity-check the atuin config that chezmoi deploys to its XDG home
+# (~/.config/atuin/config.toml). Also clears a stale symlink left by the old
+# install.sh model, so a migrating machine can take the real managed file.
 bc_setup_atuin_config() {
-  if [[ "${BASH_SPECIALISATION:-}" != "frostpaw" ]]; then
-    bc_log_warn "bc_setup_atuin_config is only supported on frostpaw systems"
-    return 1
-  fi
+  local config_file="$HOME/.config/atuin/config.toml"
 
-  # ATUIN_CONFIG_DIR is set per-host in bash_exports (atuin_homelab) and
-  # overridden per-specialisation (e.g. atuin_diamond in bashrc_diamond).
-  # Honour it so the right host config is verified; fall back to the base dir.
-  local config_dir="${ATUIN_CONFIG_DIR:-$BASH_CONFIG_DIR/configs/atuin}"
-  local config_file="$config_dir/config.toml"
+  # Clean up a legacy symlink from the old symlink-based setup, if present.
+  if [[ -L "$config_file" ]]; then
+    bc_log_info "Removing legacy symlink: $config_file"
+    rm "$config_file"
+  fi
 
   if [[ ! -f "$config_file" ]]; then
-    bc_log_error "Atuin config not found in repo: $config_file"
-    bc_log_info "ATUIN_CONFIG_DIR=${ATUIN_CONFIG_DIR:-(unset)} — check bash_exports / specialisation"
+    bc_log_error "Atuin config not found: $config_file"
+    bc_log_info "chezmoi deploys it; run 'chezmoi apply' if it is missing"
     return 1
   fi
 
-  # Clean up legacy symlink if present
-  local legacy_dest="$HOME/.config/atuin/config.toml"
-  if [[ -L "$legacy_dest" ]]; then
-    bc_log_info "Removing legacy symlink: $legacy_dest"
-    rm "$legacy_dest"
-  fi
-
-  if [[ "${ATUIN_CONFIG_DIR:-}" == "$config_dir" ]]; then
-    bc_log_success "ATUIN_CONFIG_DIR is set correctly: $config_dir"
-  else
-    bc_log_warn "ATUIN_CONFIG_DIR is not set (expected in bash_exports)"
-    bc_log_info "Setting it now for this session"
-    export ATUIN_CONFIG_DIR="$config_dir"
-  fi
+  bc_log_success "Atuin config present: $config_file"
 }
 
 # Install/refresh the systemd --user units that own the atuin daemon lifecycle.
@@ -237,7 +221,7 @@ bc_check_bash_preexec() {
 # Verify connectivity to the atuin sync server by curling its root endpoint.
 # A successful TLS handshake proves the CA cert is trusted by the system.
 # On success, displays the server response (Terry Pratchett quote).
-# Reads sync_address from $ATUIN_CONFIG_DIR/config.toml if present.
+# Reads sync_address from ~/.config/atuin/config.toml if present.
 # Frostpaw only.
 bc_verify_atuin() {
   if [[ "${BASH_SPECIALISATION:-}" != "frostpaw" ]]; then
@@ -290,7 +274,7 @@ bc_verify_atuin() {
   echo
 
   local sync_url="https://atuin.lan"
-  local atuin_cfg="${ATUIN_CONFIG_DIR:-$HOME/.config/atuin}/config.toml"
+  local atuin_cfg="$HOME/.config/atuin/config.toml"
   if [[ -f "$atuin_cfg" ]]; then
     local configured
     configured=$(grep '^sync_address' "$atuin_cfg" 2>/dev/null \

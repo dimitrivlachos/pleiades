@@ -1,5 +1,5 @@
-## Atuin configuration
-## Managed by bash-config — loaded via ATUIN_CONFIG_DIR (set in bash_exports)
+## Atuin configuration (homelab)
+## Deployed by chezmoi to ~/.config/atuin/config.toml.
 ## https://docs.atuin.sh/cli/configuration/config/
 
 # Self-hosted sync server

@@ -50,14 +50,17 @@ bash-config/                 (git repo root)
    ├─ .chezmoidata.toml      static data (specialisation -> host lists)
    ├─ .chezmoiexternal.toml  bash-preexec + tmux plugins (was submodules)
    ├─ .chezmoiignore         hide anything not meant for $HOME
+   ├─ .chezmoitemplates/     specialisation-*, fastfetch-*, atuin-* partials
    ├─ dot_bashrc.tmpl        managed block: BASH_SPECIALISATION + source
    ├─ dot_config/
    │  ├─ bash-config/        the bash_* modules land here (BASH_CONFIG_DIR)
    │  │  ├─ bashrc_core
    │  │  ├─ bash_tools  bash_ssh  bash_history  ...
    │  │  ├─ specialisation.sh.tmpl   the collapsed specialisations
-   │  │  ├─ fastfetch/  atuin/
+   │  │  ├─ gitconfig_base           base git aliases/core/colours
    │  │  └─ encrypted_private_bash_secrets.sh   (age)
+   │  ├─ fastfetch/config.jsonc.tmpl per machine + arch (its XDG home)
+   │  ├─ atuin/config.toml.tmpl      homelab or diamond (its XDG home)
    │  ├─ tmux/tmux.conf
    │  └─ systemd/user/*.service *.timer
    ├─ dot_gitconfig.tmpl     base + specialisation include + identity
@@ -77,7 +80,7 @@ bash-config/                 (git repo root)
 | `bashrc_core` + `bash_*` modules (sourced from checkout) | copied to `~/.config/bash-config/`; `BASH_CONFIG_DIR` points there |
 | `specialisations/bashrc_{frostpaw,diamond,asteria}` | one `specialisation.sh.tmpl`, `{{ if eq .specialisation }}` blocks |
 | `configs/gitconfig_*` + `secrets/gitconfig_user_*` | `dot_gitconfig.tmpl` + two encrypted identity includes |
-| `configs/fastfetch_*.jsonc`, `configs/atuin/*` | static files under `dot_config/bash-config/`, selected by the specialisation template |
+| `configs/fastfetch_*.jsonc`, `configs/atuin/*` | promoted to their XDG homes as `dot_config/fastfetch/config.jsonc.tmpl` and `dot_config/atuin/config.toml.tmpl`, selected per machine at apply time via `.chezmoitemplates` partials |
 | `configs/tmux/` + 3 plugin submodules | `dot_config/tmux/`; plugins via `.chezmoiexternal.toml` |
 | `configs/systemd/user/*` | `dot_config/systemd/user/*` + a `run_onchange_` enabler |
 | `secrets/bash_secrets.sh` | `encrypted_private_bash_secrets.sh` (key rotated) |

@@ -4,8 +4,8 @@
 # ==============================================================================
 # Environment variables shared across all systems/specialisations.
 # Machine-specific exports should be defined in:
-#   - secrets/bash_secrets.sh (for sensitive values)
-#   - specialisations/bashrc_* (for machine-specific configs)
+#   - bash_secrets.sh (encrypted, for sensitive values)
+#   - home/.chezmoitemplates/specialisation-* (for machine-specific configs)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -58,6 +58,6 @@ export PIXI_CACHE_DIR="$PIXI_HOME/cache"
 # The env script has its own PATH dedup guard built in.
 [[ -f "$HOME/.atuin/bin/env" ]] && . "$HOME/.atuin/bin/env"
 
-# Point atuin at the repo-managed config directory instead of symlinking
-# into ~/.config/atuin/.  Atuin reads $ATUIN_CONFIG_DIR/config.toml.
-export ATUIN_CONFIG_DIR="$BASH_CONFIG_DIR/configs/atuin/atuin_homelab"
+# Atuin reads ~/.config/atuin/config.toml by default; chezmoi deploys the
+# per-machine config there (see home/dot_config/atuin/config.toml.tmpl), so
+# no ATUIN_CONFIG_DIR override is needed.
