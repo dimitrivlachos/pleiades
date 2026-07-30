@@ -1,0 +1,123 @@
+name: verify
+
+# Small verifier for the chezmoi source. Runs without the age key, so it never
+# decrypts secrets: it checks that the shell parses, that the templates render
+# for every specialisation, and that no secret or personal-identity material
+# has landed in tracked plaintext. Runtime state (systemd units, trust store,
+# key presence) is out of scope here - that is what bc_doctor covers on a real
+# machine.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Shell syntax (bash -n)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on every shell module
+        run: |
+          set -u
+          fail=0
+          for f in home/dot_config/bash-config/bashrc_core home/dot_config/bash-config/bash_*; do
+            if bash -n "$f"; then
+              echo "ok   $f"
+            else
+              echo "::error file=$f::bash syntax error"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+  render:
+    name: chezmoi render (frostpaw/diamond/asteria)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install chezmoi
+        run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+      - name: Render each specialisation without the age key
+        run: |
+          set -u
+          export PATH="$HOME/.local/bin:$PATH"
+          fail=0
+          for spec in frostpaw diamond asteria; do
+            dest="$(mktemp -d)"
+            cfg="$(mktemp -d)/chezmoi.toml"   # chezmoi picks format from the .toml extension
+            printf '[data]\n    specialisation = "%s"\n' "$spec" > "$cfg"
+            if chezmoi --source "$PWD" --config "$cfg" --destination "$dest" \
+                 apply --exclude=encrypted,externals --force; then
+              if python3 -c "import json; json.load(open('$dest/.config/fastfetch/config.jsonc'))"; then
+                echo "ok   $spec: rendered, fastfetch JSON valid"
+              else
+                echo "::error::$spec: invalid fastfetch JSON"
+                fail=1
+              fi
+              if ! bash -n "$dest/.config/bash-config/specialisation.sh"; then
+                echo "::error::$spec: rendered specialisation.sh has a syntax error"
+                fail=1
+              fi
+            else
+              echo "::error::$spec: chezmoi render failed"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+  leak-guard:
+    name: Secret / identity leak guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Structural: the identity-bearing files must exist only as encrypted
+      # *.age. A plaintext form (e.g. a decrypted secret committed by mistake)
+      # is a leak. Names paths, never identities.
+      - name: Secret files must be encrypted
+        run: |
+          offenders="$(git ls-files -- '*bash_secrets.sh' '*gitconfig_user_*' '*id_ed25519_*' \
+                        | grep -v '\.age$' || true)"
+          if [ -n "$offenders" ]; then
+            echo "$offenders" | sed 's/^/::error::plaintext secret (must be encrypted_*.age): /'
+            exit 1
+          fi
+          echo "ok: no plaintext secret files"
+
+      # Format: fail on material that is secret by shape, not by value, so no
+      # sensitive string ever lives in this workflow. Prints filenames only.
+      - name: No key-shaped material in plaintext
+        run: |
+          files="$(git grep -lIE \
+                     -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+                     -e 'sk-[A-Za-z0-9]{20,}' \
+                     -- ':!*.age' || true)"
+          if [ -n "$files" ]; then
+            echo "::error::secret-shaped material in tracked plaintext (filenames only):"
+            echo "$files" | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "ok: no key-shaped material"
+
+      # Identity denylist: the actual personal-identity tokens live only in the
+      # LEAK_PATTERNS repo secret, never in the tree. Prints filenames only, so
+      # a match is never echoed. Absent on fork PRs -> the step skips.
+      - name: Personal-identity denylist
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: |
+          if [ -z "${LEAK_PATTERNS:-}" ]; then
+            echo "LEAK_PATTERNS not set (or unavailable on a fork PR); skipping"
+            exit 0
+          fi
+          files="$(git grep -lIiE "$LEAK_PATTERNS" -- ':!*.age' || true)"
+          if [ -n "$files" ]; then
+            echo "::error::personal-identity token found in tracked plaintext (filenames only):"
+            echo "$files" | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "ok: no identity tokens in plaintext"
