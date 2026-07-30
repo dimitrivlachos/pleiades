@@ -394,35 +394,42 @@ bc_ssh_agent_status() {
 # Private keys are per-machine and NEVER stored in git; only public keys
 # leave the machine. Interactive: ssh-keygen prompts for a passphrase, which
 # the agent then caches (AddKeysToAgent yes) so it's needed once per boot.
+# Echo the "keyname:description" list this specialisation is expected to have,
+# one per line. Empty output + return 1 for an unknown specialisation. Single
+# source of truth for both bc_setup_ssh_keys and the config doctor's key probe.
+_bc_ssh_expected_keys() {
+    case "${BASH_SPECIALISATION:-}" in
+        frostpaw)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
+                "id_ed25519_github_s:GitHub second account" \
+                "id_ed25519_personal:personal hosts (asteria/acrux/lyra/polaris/spark/atlas)"
+            ;;
+        asteria)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
+                "id_ed25519_personal:personal hosts (acrux/lyra/polaris/spark/atlas)"
+            ;;
+        diamond)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 bc_setup_ssh_keys() {
     local host="${HOSTNAME:-$(uname -n)}"
     host="${host%%.*}"
     # key name → description shown when offering to generate it
     local -a expected=()
-    case "${BASH_SPECIALISATION:-}" in
-        frostpaw)
-            expected=(
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
-                "id_ed25519_github_s:GitHub second account"
-                "id_ed25519_personal:personal hosts (asteria/acrux/lyra/polaris/spark/atlas)"
-            )
-            ;;
-        asteria)
-            expected=(
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
-                "id_ed25519_personal:personal hosts (acrux/lyra/polaris/spark/atlas)"
-            )
-            ;;
-        diamond)
-            expected=(
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
-            )
-            ;;
-        *)
-            bc_log_warn "Unknown specialisation '${BASH_SPECIALISATION:-}', no key list defined"
-            return 1
-            ;;
-    esac
+    mapfile -t expected < <(_bc_ssh_expected_keys)
+    if [[ ${#expected[@]} -eq 0 ]]; then
+        bc_log_warn "Unknown specialisation '${BASH_SPECIALISATION:-}', no key list defined"
+        return 1
+    fi
 
     local entry key desc keyfile generated=0
     local -a new_keys=()

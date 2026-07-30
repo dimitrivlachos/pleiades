@@ -6,7 +6,7 @@
 # Includes:
 #   - Environment helpers (mae)
 #   - System info (bc_ff/ff)
-#   - Configuration management (bc_validate_config, bc_info)
+#   - Configuration management (bc_info; health via bc_doctor in bash_doctor)
 #   - Update management (bc_check_updates, bc_update_config)
 #   - Git configuration validation (bc_check_git_config)
 # ==============================================================================
@@ -76,112 +76,11 @@ ff() { bc_ff "$@"; }
 # CONFIGURATION VALIDATION
 # ==============================================================================
 
-# Validate all configuration settings
+# Validate all configuration settings.
+# Back-compat shim: the real implementation is now the config doctor
+# (bash_doctor). This keeps the old name working for help text and habits.
 bc_validate_config() {
-  local issues=0
-  
-  bc_log_info "Config Validation"
-  
-  # Check BASH_CONFIG_DIR
-  if [[ -n "${BASH_CONFIG_DIR:-}" && -d "$BASH_CONFIG_DIR" ]]; then
-    bc_log_success "Config directory found: $BASH_CONFIG_DIR"
-  else
-    bc_log_error "Config directory missing or not set: ${BASH_CONFIG_DIR:-'(not set)'}"
-    ((issues++))
-  fi
-  
-  # Check specialization file
-  if [[ -n "${BASH_SPECIALISATION:-}" ]]; then
-    local spec_file="$BASH_CONFIG_DIR/specialisation.sh"
-    if [[ -f "$spec_file" ]]; then
-      bc_log_success "Specialisation file found: $spec_file"
-    else
-      bc_log_error "Specialisation file missing: $spec_file"
-      ((issues++))
-    fi
-  else
-    bc_log_info "No specialisation set"
-  fi
-  
-  # Check fastfetch config (chezmoi deploys it to the XDG default path)
-  local ff_config="$HOME/.config/fastfetch/config.jsonc"
-  if [[ -f "$ff_config" ]]; then
-    bc_log_success "Fastfetch config found: $ff_config"
-  else
-    bc_log_warn "Fastfetch config missing: $ff_config (run 'chezmoi apply')"
-  fi
-  
-  # Check fastfetch binary
-  if [[ -n "${FASTFETCH_BIN:-}" ]]; then
-    if command -v "$FASTFETCH_BIN" &>/dev/null; then
-      bc_log_success "Fastfetch binary found: $FASTFETCH_BIN"
-    else
-      bc_log_error "Fastfetch binary not executable: $FASTFETCH_BIN"
-      ((issues++))
-    fi
-  fi
-  
-  # Check secrets file
-  local secrets_file="$BASH_CONFIG_DIR/bash_secrets.sh"
-  if [[ -f "$secrets_file" ]]; then
-    bc_log_success "Secrets file found"
-  else
-    bc_log_warn "No secrets file (this may be intentional)"
-  fi
-  
-  # Check SSH configuration
-  if command -v bc_check_ssh_config >/dev/null 2>&1 && bc_check_ssh_config silent >/dev/null 2>&1; then
-    bc_log_success "SSH config properly configured"
-  else
-    bc_log_warn "SSH config issues detected (run 'ssh-setup' to fix)"
-  fi
-  
-  # Check Git configuration
-  if command -v bc_check_git_config >/dev/null 2>&1 && bc_check_git_config silent >/dev/null 2>&1; then
-    bc_log_success "Git config properly configured"
-  else
-    bc_log_warn "Git config issues detected (run 'chezmoi apply' to redeploy ~/.gitconfig)"
-  fi
-
-  # Check CA certificates (gracefully skips when no certs dir exists)
-  if command -v bc_check_certs >/dev/null 2>&1; then
-    if bc_check_certs silent; then
-      [[ -d "${BASH_CONFIG_DIR:-}/certs" ]] && bc_log_success "CA certs installed"
-    else
-      bc_log_warn "CA cert(s) missing or outdated (run 'bc_setup_certs')"
-      ((issues++))
-    fi
-  fi
-  
-  # Check SSH key if set
-  if [[ -n "${DIAMOND_GITHUB_KEY:-}" ]]; then
-    if [[ -f "$DIAMOND_GITHUB_KEY" ]]; then
-      bc_log_success "SSH key file found: $DIAMOND_GITHUB_KEY"
-    else
-      bc_log_error "SSH key file missing: $DIAMOND_GITHUB_KEY"
-      ((issues++))
-    fi
-  fi
-  
-  # Check history configuration
-  if [[ -n "${HISTFILE:-}" ]]; then
-    if [[ -f "$HISTFILE" ]]; then
-      bc_log_success "History file found: $HISTFILE"
-      local hist_size
-      hist_size=$(wc -l < "$HISTFILE" 2>/dev/null || echo "0")
-      bc_log_info "History contains $hist_size commands"
-    else
-      bc_log_warn "History file path set but file doesn't exist: $HISTFILE"
-    fi
-  fi
-  
-  if [[ $issues -eq 0 ]]; then
-    bc_log_success "Configuration looks good!"
-    return 0
-  else
-    bc_log_error "Found $issues issue(s)"
-    return 1
-  fi
+  bc_doctor "$@"
 }
 
 # Display configuration information
@@ -286,7 +185,7 @@ bc_help() {
         echo
         echo -e "${BC_COLOR_YELLOW}Quick Commands:${BC_COLOR_RESET}"
         echo "  bc_info           - Show current configuration"
-        echo "  bc_validate_config - Validate all settings"
+        echo "  bc_doctor [--fix] - Check config health and optionally repair"
         echo "  bc_debug_toggle   - Toggle debug logging"
         echo
         echo -e "${BC_COLOR_GRAY}Tip: Run 'bc_help <topic>' for detailed help${BC_COLOR_RESET}"
@@ -336,7 +235,10 @@ bc_help() {
             echo
             echo -e "${BC_COLOR_BLUE}Commands:${BC_COLOR_RESET}"
             echo "  bc_info            - Display current configuration status"
-            echo "  bc_validate_config - Check all configuration settings"
+            echo "  bc_doctor          - Check every health item (read-only)"
+            echo "  bc_doctor --fix    - Repair: auto-fix safe issues, prompt for risky ones"
+            echo "  bc_doctor --online - Also run the update + atuin server checks"
+            echo "  bc_validate_config - Alias for 'bc_doctor' (report only)"
             echo "  bc_debug_toggle    - Enable/disable debug logging"
             echo
             echo -e "${BC_COLOR_BLUE}Environment Variables:${BC_COLOR_RESET}"

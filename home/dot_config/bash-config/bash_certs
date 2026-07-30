@@ -103,10 +103,10 @@ bc_setup_certs() {
 # CERTIFICATE VALIDATION
 # ==============================================================================
 
-# Check that all *.crt files from secrets/certs/ are present and current in
-# the system trust store.  Pass "silent" to suppress output (used by
-# bc_validate_config).  Gracefully returns 0 when no certs directory exists,
-# so this check is safe to run on non-frostpaw specialisations.
+# Check that all *.crt files from $BASH_CONFIG_DIR/certs are present and current
+# in the system trust store.  Pass "silent" to suppress output (used by
+# bc_doctor).  Gracefully returns 0 when no certs directory exists, so this
+# check is safe to run on non-frostpaw specialisations.
 bc_check_certs() {
   local silent="${1:-}"
   local certs_dir="$BASH_CONFIG_DIR/certs"

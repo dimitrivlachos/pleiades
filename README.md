@@ -118,6 +118,28 @@ A daily login check nudges you when the source is behind upstream.
 
 ---
 
+## 🩺 Health check
+
+`bc_doctor` rolls up every check in one place - gitconfig, ssh config
+and permissions, systemd units, certs, atuin, fastfetch, secrets - and
+skips whatever does not apply to this machine's specialisation.
+
+```bash
+bc_doctor              # report only (read-only), offline
+bc_doctor --fix        # repair: auto-fix the safe issues, prompt for risky ones
+bc_doctor --fix certs  # repair just one check
+bc_doctor --online     # also run the update + atuin-server checks
+```
+
+Safe fixes run unattended: a drifted chezmoi-managed file is re-applied
+with `chezmoi apply <path>`, permissions are `chmod`ed, systemd `--user`
+units are enabled. The risky ones prompt first - anything needing `sudo`
+(the CA trust store) or `ssh-keygen` (generating a missing key).
+`doctor` is a shorthand alias, and `bc_validate_config` still works as a
+report-only alias.
+
+---
+
 ## 🧠 Specialisations
 
 The specialisation is chosen at `chezmoi init` and stored in

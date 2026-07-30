@@ -954,7 +954,7 @@ preserved across sessions.
 
 🚨 TROUBLESHOOTING
   - History not syncing? Run: hs (manual sync)
-  - Commands missing? Check: bc_validate_config
+  - Commands missing? Check: bc_doctor  (add --fix to repair)
   - Need fresh start? Backup first: hbackup
   - File corruption? Import from backup: himport <backup_file>
 
