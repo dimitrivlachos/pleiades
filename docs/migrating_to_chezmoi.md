@@ -52,7 +52,7 @@ never merges on its own, so simply logging in is safe.
 ### 1. Install chezmoi and clone the source
 
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/bash-config
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
 ```
 
 This installs chezmoi, clones the source to `~/.local/share/chezmoi`,
