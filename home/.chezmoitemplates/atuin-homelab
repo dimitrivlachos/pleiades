@@ -1,0 +1,54 @@
+## Atuin configuration (homelab)
+## Deployed by chezmoi to ~/.config/atuin/config.toml.
+## https://docs.atuin.sh/cli/configuration/config/
+
+# Self-hosted sync server
+sync_address = "https://atuin.lan"
+
+# Date format for `atuin stats`
+dialect = "uk"
+
+# Don't override up-arrow — keep standard bash navigation
+# Ctrl+R is still bound to atuin search
+up_arrow_history = false
+
+# Sync after each session, every 5 minutes
+auto_sync = true
+# sync_frequency = "5m" # Conservative sync frequency
+sync_frequency = "1m" # Aggressive sync frequency
+
+# Use the daemon's in-memory index for faster fuzzy search (requires daemon below)
+search_mode = "daemon-fuzzy"
+
+# Default filter: search across all machines
+# Toggle with Ctrl+R during search (cycles: global → host → session → directory)
+filter_mode = "global"
+
+# When pressing enter in the TUI, execute immediately
+# (press Tab instead to edit before executing)
+# enter_accept = true
+
+# Show host column — useful when syncing across multiple machines
+[ui]
+columns = ["duration", "time", "host", "command"]
+
+# Sync v2 — faster incremental sync protocol
+[sync]
+records = true
+
+# AI-powered natural language search — requires Atuin's cloud AI backend.
+# Not supported by self-hosted servers, so this has no effect here.
+# [ai]
+# enabled = true
+
+[daemon]
+# Background process that maintains an in-memory search index and handles sync.
+# Lifecycle is owned by the systemd --user unit atuin-daemon.service (see
+# ~/.config/systemd/user/), NOT by autostart: autostart spawned the daemon from
+# whatever environment the shell hook happened to run in, so it bound an
+# inconsistent socket path (/run/user/$UID/atuin.sock when XDG_RUNTIME_DIR was
+# set, ~/.local/share/atuin/atuin.sock when it wasn't). Shells then connected to
+# a stale socket left by a dead daemon and hung ~4s per command. systemd gives
+# one consistent environment (XDG_RUNTIME_DIR=/run/user/$UID) plus auto-restart.
+enabled = true
+autostart = false

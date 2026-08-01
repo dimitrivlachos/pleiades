@@ -1,0 +1,277 @@
+#!/bin/bash
+# ==============================================================================
+# TOOLS AND UTILITY FUNCTIONS
+# ==============================================================================
+# Shared utility functions for bash-config system.
+# Includes:
+#   - Environment helpers (mae)
+#   - System info (bc_ff/ff)
+#   - Configuration management (bc_info; health via bc_doctor in bash_doctor)
+#   - Update management (bc_check_updates, bc_update_config)
+#   - Git configuration validation (bc_check_git_config)
+# ==============================================================================
+
+# ==============================================================================
+# ENVIRONMENT HELPERS
+# ==============================================================================
+
+# Detect the available mamba command (prefers micromamba)
+# Returns: "micromamba", "mamba", or "" if neither is found
+bc_mamba_cmd() {
+  if command -v micromamba &>/dev/null; then
+    echo "micromamba"
+  elif command -v mamba &>/dev/null; then
+    echo "mamba"
+  else
+    echo ""
+  fi
+}
+
+# Activate local mamba/micromamba environment
+# Usage: mae [env_name]  (default: ENV)
+mae() {
+  local env_name="${1:-ENV}"
+  local env_path=""
+
+  if [ -d "./$env_name" ]; then
+    env_path="$(pwd)/$env_name"
+  elif [ -d "../$env_name" ]; then
+    env_path="$(cd .. && pwd)/$env_name"
+  else
+    bc_log_error "No environment '$env_name' found in current or parent directory."
+    return 1
+  fi
+
+  local mamba_cmd
+  mamba_cmd=$(bc_mamba_cmd)
+  if [[ -z "$mamba_cmd" ]]; then
+    bc_log_error "Neither micromamba nor mamba found in PATH."
+    return 1
+  fi
+  $mamba_cmd activate "$env_path"
+}
+
+# ==============================================================================
+# SYSTEM INFORMATION
+# ==============================================================================
+
+# Fastfetch wrapper. chezmoi deploys the per-machine config to
+# ~/.config/fastfetch/config.jsonc (fastfetch's default path), so no --config
+# override is needed. FASTFETCH_BIN can still point at a custom build.
+bc_ff() {
+  local ff_bin="${FASTFETCH_BIN:-fastfetch}"
+
+  if command -v "$ff_bin" &>/dev/null; then
+    "$ff_bin" 2>/dev/null
+  else
+    bc_log_error "[fastfetch] binary not found: $ff_bin"
+    return 1
+  fi
+}
+
+# Backward compatibility alias
+ff() { bc_ff "$@"; }
+
+# ==============================================================================
+# CONFIGURATION VALIDATION
+# ==============================================================================
+
+# Validate all configuration settings.
+# Back-compat shim: the real implementation is now the config doctor
+# (bash_doctor). This keeps the old name working for help text and habits.
+bc_validate_config() {
+  bc_doctor "$@"
+}
+
+# Display configuration information
+bc_info() {
+  echo -e "${BC_COLOR_CYAN}📋 Bash Configuration Information:${BC_COLOR_RESET}"
+  echo -e "  ${BC_COLOR_BLUE}Version:${BC_COLOR_RESET} ${BASH_CONFIG_VERSION:-'unknown'}"
+  echo -e "  ${BC_COLOR_BLUE}Directory:${BC_COLOR_RESET} ${BASH_CONFIG_DIR:-'not set'}"
+  echo -e "  ${BC_COLOR_BLUE}Specialisation:${BC_COLOR_RESET} ${BASH_SPECIALISATION:-'none'}"
+  echo -e "  ${BC_COLOR_BLUE}Host:${BC_COLOR_RESET} $(hostname)"
+  echo -e "  ${BC_COLOR_BLUE}User:${BC_COLOR_RESET} $USER"
+  [[ -n "${FASTFETCH_BIN:-}" ]] && echo -e "  ${BC_COLOR_BLUE}Fastfetch:${BC_COLOR_RESET} $FASTFETCH_BIN"
+  
+  # SSH agent status
+  if ssh-add -l >/dev/null 2>&1; then
+    local key_count
+    key_count=$(ssh-add -l 2>/dev/null | wc -l)
+    echo -e "  ${BC_COLOR_BLUE}SSH Agent:${BC_COLOR_RESET} ${BC_COLOR_GREEN}Active${BC_COLOR_RESET} (${key_count} key(s) loaded)"
+  else
+    echo -e "  ${BC_COLOR_BLUE}SSH Agent:${BC_COLOR_RESET} ${BC_COLOR_YELLOW}Inactive${BC_COLOR_RESET}"
+  fi
+  
+  # History status
+  if [[ -n "${HISTFILE:-}" ]]; then
+    if [[ -f "$HISTFILE" ]]; then
+      local hist_size
+      hist_size=$(wc -l < "$HISTFILE" 2>/dev/null || echo "0")
+      echo -e "  ${BC_COLOR_BLUE}History:${BC_COLOR_RESET} ${BC_COLOR_GREEN}Unified${BC_COLOR_RESET} ($hist_size commands)"
+    else
+      echo -e "  ${BC_COLOR_BLUE}History:${BC_COLOR_RESET} ${BC_COLOR_YELLOW}Local only${BC_COLOR_RESET}"
+    fi
+  else
+    echo -e "  ${BC_COLOR_BLUE}History:${BC_COLOR_RESET} ${BC_COLOR_YELLOW}Default${BC_COLOR_RESET}"
+  fi
+}
+
+# Toggle debug logging
+bc_debug_toggle() {
+  if [[ "${BASH_CONFIG_DEBUG:-}" == "true" ]]; then
+    export BASH_CONFIG_DEBUG="false"
+    bc_log_info "Debug logging disabled"
+  else
+    export BASH_CONFIG_DEBUG="true"
+    bc_log_info "Debug logging enabled"
+    bc_log_debug "This is a debug message example"
+  fi
+}
+
+# ==============================================================================
+# GIT CONFIGURATION
+# ==============================================================================
+
+# Validate Git configuration
+bc_check_git_config() {
+    local silent="${1:-false}"
+    local git_config="$HOME/.gitconfig"
+    local base_config="$BASH_CONFIG_DIR/gitconfig_base"
+    
+    bc_log_debug "Checking Git config: $git_config"
+    
+    if [[ ! -f "$base_config" ]]; then
+        [[ "$silent" != "silent" ]] && bc_log_error "Base Git config not found in repo: $base_config"
+        return 1
+    fi
+    
+    if [[ ! -f "$git_config" ]]; then
+        [[ "$silent" != "silent" ]] && bc_log_warn "Git config not found: $git_config"
+        return 1
+    fi
+    
+    # The chezmoi-managed ~/.gitconfig writes the include with a literal ~, so
+    # match on the tail rather than a $BASH_CONFIG_DIR-expanded absolute path.
+    if ! grep -q "bash-config/gitconfig_base" "$git_config"; then
+        [[ "$silent" != "silent" ]] && bc_log_warn "Git config doesn't include base config with correct path"
+        return 1
+    fi
+    
+    [[ "$silent" != "silent" ]] && bc_log_success "Git config properly configured"
+    return 0
+}
+
+# ==============================================================================
+# MASTER HELP SYSTEM
+# ==============================================================================
+
+# Centralized help for all bash-config functions
+bc_help() {
+    local topic="${1:-}"
+    
+    if [[ -z "$topic" ]]; then
+        echo -e "${BC_COLOR_CYAN}🌀 Bash Config Help (v${BASH_CONFIG_VERSION:-unknown})${BC_COLOR_RESET}"
+        echo
+        echo -e "${BC_COLOR_BLUE}Usage:${BC_COLOR_RESET} bc_help [topic]"
+        echo
+        echo -e "${BC_COLOR_YELLOW}Available Topics:${BC_COLOR_RESET}"
+        echo "  prompt    - Prompt customization commands"
+        echo "  history   - History management (hhelp)"
+        echo "  ssh       - SSH management (ssh-help)"
+        echo "  git       - Git configuration"
+        echo "  project   - Project workspace management (proj-help)"
+        echo "  config    - Configuration validation and info"
+        echo "  update    - Update management"
+        echo
+        echo -e "${BC_COLOR_YELLOW}Quick Commands:${BC_COLOR_RESET}"
+        echo "  bc_info           - Show current configuration"
+        echo "  bc_doctor [--fix] - Check config health and optionally repair"
+        echo "  bc_debug_toggle   - Toggle debug logging"
+        echo
+        echo -e "${BC_COLOR_GRAY}Tip: Run 'bc_help <topic>' for detailed help${BC_COLOR_RESET}"
+        return
+    fi
+    
+    case "$topic" in
+        prompt)
+            ph
+            ;;
+        history)
+            if command -v hhelp &>/dev/null; then
+                hhelp
+            else
+                bc_log_warn "History module not loaded"
+            fi
+            ;;
+        ssh)
+            if command -v bc_ssh_help &>/dev/null; then
+                bc_ssh_help
+            else
+                bc_log_warn "SSH module not loaded"
+            fi
+            ;;
+        git)
+            echo -e "${BC_COLOR_CYAN}🔧 Git Configuration:${BC_COLOR_RESET}"
+            echo
+            echo -e "${BC_COLOR_BLUE}Commands:${BC_COLOR_RESET}"
+            echo "  bc_check_git_config - Validate git configuration"
+            echo "  (~/.gitconfig is deployed by chezmoi; run 'chezmoi apply' to refresh)"
+            echo
+            echo -e "${BC_COLOR_BLUE}Files:${BC_COLOR_RESET}"
+            echo "  gitconfig_base                  - Shared aliases and settings"
+            echo "  gitconfig_user_{public,private} - Encrypted identities (chezmoi)"
+            echo
+            echo -e "${BC_COLOR_GRAY}Run 'git aliases' to see all available git shortcuts${BC_COLOR_RESET}"
+            ;;
+        project)
+            if command -v bc_project_help &>/dev/null; then
+                bc_project_help
+            else
+                bc_log_warn "Project module not loaded"
+            fi
+            ;;
+        config)
+            echo -e "${BC_COLOR_CYAN}⚙️ Configuration Management:${BC_COLOR_RESET}"
+            echo
+            echo -e "${BC_COLOR_BLUE}Commands:${BC_COLOR_RESET}"
+            echo "  bc_info            - Display current configuration status"
+            echo "  bc_doctor          - Check every health item (read-only)"
+            echo "  bc_doctor --fix    - Repair: auto-fix safe issues, prompt for risky ones"
+            echo "  bc_doctor --online - Also run the update + atuin server checks"
+            echo "  bc_validate_config - Alias for 'bc_doctor' (report only)"
+            echo "  bc_debug_toggle    - Enable/disable debug logging"
+            echo
+            echo -e "${BC_COLOR_BLUE}Environment Variables:${BC_COLOR_RESET}"
+            echo "  BASH_CONFIG_DIR     - Root directory of bash-config"
+            echo "  BASH_SPECIALISATION - Current specialisation (frostpaw/diamond/asteria)"
+            echo "  BASH_CONFIG_DEBUG   - Enable debug logging (true/false)"
+            ;;
+        update)
+            echo -e "${BC_COLOR_CYAN}🔄 Update Management:${BC_COLOR_RESET}"
+            echo
+            echo -e "${BC_COLOR_BLUE}bash-config repo updates (bash_config_update):${BC_COLOR_RESET}"
+            echo "  bc_check_updates [mode]    - Check if the config repo has upstream changes"
+            echo "    modes: notify (default), silent, verbose"
+            echo
+            echo "  bc_update_config [action]  - Show or apply config repo updates"
+            echo "    actions: show (default), update"
+            echo
+            echo -e "${BC_COLOR_BLUE}OS package updates (bash_update):${BC_COLOR_RESET}"
+            echo "  update                     - Update system packages"
+            echo "  cleanup                    - Remove orphaned packages"
+            echo "  full_update                - Update + cleanup"
+            echo "  update_help                - Full OS update help"
+            echo
+            echo -e "${BC_COLOR_BLUE}Examples:${BC_COLOR_RESET}"
+            echo "  bc_check_updates           # Check config repo for new commits"
+            echo "  bc_update_config           # Show pending config changes"
+            echo "  bc_update_config update    # Apply config updates"
+            echo "  update                     # Update system packages"
+            ;;
+        *)
+            bc_log_error "Unknown topic: $topic"
+            bc_log_info "Run 'bc_help' to see available topics"
+            return 1
+            ;;
+    esac
+}

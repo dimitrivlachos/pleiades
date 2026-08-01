@@ -1,0 +1,23 @@
+# External dependencies fetched by chezmoi on apply, replacing the old
+# git submodules (bash-preexec + the three tmux plugins). Paths are
+# relative to $HOME. Refreshed weekly.
+
+[".config/bash-config/bash-preexec"]
+    type = "git-repo"
+    url = "https://github.com/rcaloras/bash-preexec.git"
+    refreshPeriod = "168h"
+
+[".config/tmux/plugins/catppuccin/tmux"]
+    type = "git-repo"
+    url = "https://github.com/catppuccin/tmux.git"
+    refreshPeriod = "168h"
+
+[".config/tmux/plugins/tmux-plugins/tmux-cpu"]
+    type = "git-repo"
+    url = "https://github.com/tmux-plugins/tmux-cpu.git"
+    refreshPeriod = "168h"
+
+[".config/tmux/plugins/tmux-plugins/tmux-battery"]
+    type = "git-repo"
+    url = "https://github.com/tmux-plugins/tmux-battery.git"
+    refreshPeriod = "168h"

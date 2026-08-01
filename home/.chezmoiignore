@@ -1,0 +1,3 @@
+# Files in the source tree that should NOT be applied to $HOME.
+# Target-path patterns, one per line. Populated as needed during the
+# migration (e.g. paths that only exist to be sourced, not deployed).

@@ -1,0 +1,281 @@
+#!/bin/bash
+# ==============================================================================
+# CONFIG DOCTOR
+# ==============================================================================
+# One entry point that runs every health check and, on --fix, repairs what it
+# can. It does not own any diagnostic or repair logic - those live in the
+# domain modules (bash_ssh, bash_certs, bash_history, bash_config_update,
+# bash_tools). This module just orchestrates them through a small registry.
+#
+# Sourced last (after all domain modules) so every primitive it calls is
+# already defined.
+#
+# Usage:
+#   bc_doctor              # report only (read-only), offline
+#   bc_doctor --fix        # auto-repair the safe issues, prompt for risky ones
+#   bc_doctor --fix <name> # repair just one check (e.g. bc_doctor --fix certs)
+#   bc_doctor --online     # also run the network checks (update + atuin server)
+#
+# Remediation kinds:
+#   apply:<path>  chezmoi-owned drift - re-apply just that managed path (safe)
+#   fn:<function> a local fixer chezmoi cannot do (chmod, systemctl, sudo, keygen)
+#   manual:<hint> printed advice; the doctor never acts on it
+#
+# Risk levels drive --fix: `safe` runs unattended, `prompt` asks first,
+# `report` is never auto-run (advice only).
+# ==============================================================================
+
+# --- run-scoped finding state (reset at the start of every bc_doctor run) ---
+_BC_DOCTOR_LABELS=()
+_BC_DOCTOR_RISKS=()
+_BC_DOCTOR_REMEDIES=()
+_BC_DOCTOR_ONLINE=0
+
+# ------------------------------------------------------------------------------
+# Gates - decide whether a check applies to this machine at all. A gated-out
+# check is skipped (not counted as a failure), so e.g. diamond is never nagged
+# about the frostpaw-only atuin daemon.
+# ------------------------------------------------------------------------------
+_bc_doctor_gate_ok() {
+  case "$1" in
+    always)   return 0 ;;
+    spec-set) [[ -n "${BASH_SPECIALISATION:-}" ]] ;;
+    frostpaw) [[ "${BASH_SPECIALISATION:-}" == "frostpaw" ]] ;;
+    systemd)
+      command -v systemctl >/dev/null 2>&1 \
+        && systemctl --user show-environment >/dev/null 2>&1 ;;
+    frostpaw-systemd)
+      [[ "${BASH_SPECIALISATION:-}" == "frostpaw" ]] \
+        && command -v systemctl >/dev/null 2>&1 \
+        && systemctl --user show-environment >/dev/null 2>&1 ;;
+    has-keylist) _bc_ssh_expected_keys >/dev/null 2>&1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# ------------------------------------------------------------------------------
+# Local probes for state that has no existing bc_check_* primitive. Each returns
+# 0 when HEALTHY, non-zero when there is a problem (same contract as the
+# bc_check_* functions the registry also calls).
+# ------------------------------------------------------------------------------
+_bc_doctor_have_configdir() { [[ -n "${BASH_CONFIG_DIR:-}" && -d "${BASH_CONFIG_DIR}" ]]; }
+_bc_doctor_have_spec()      { [[ -f "${BASH_CONFIG_DIR:-}/specialisation.sh" ]]; }
+_bc_doctor_have_atuin_cfg() { [[ -f "$HOME/.config/atuin/config.toml" ]]; }
+_bc_doctor_have_ff_cfg()    { [[ -f "$HOME/.config/fastfetch/config.jsonc" ]]; }
+_bc_doctor_have_secrets()   { [[ -f "${BASH_CONFIG_DIR:-}/bash_secrets.sh" ]]; }
+
+# systemd --user unit is active
+_bc_doctor_unit_active() { systemctl --user is-active --quiet "$1" 2>/dev/null; }
+
+# ~/.ssh strict permissions: dir 700, config and private keys 600.
+_bc_doctor_ssh_perms_ok() {
+  local d="$HOME/.ssh"
+  [[ -d "$d" ]] || return 0                                  # nothing to check
+  [[ "$(stat -c %a "$d" 2>/dev/null)" == "700" ]] || return 1
+  local f
+  for f in "$d"/config "$d"/id_*; do
+    [[ -e "$f" ]] || continue
+    case "$f" in *.pub) continue ;; esac                     # public keys are 644
+    [[ "$(stat -c %a "$f" 2>/dev/null)" == "600" ]] || return 1
+  done
+  return 0
+}
+
+# Every private key this specialisation expects is present.
+_bc_doctor_ssh_keys_ok() {
+  local -a expected=()
+  mapfile -t expected < <(_bc_ssh_expected_keys)
+  [[ ${#expected[@]} -gt 0 ]] || return 0                    # no list -> nothing to check
+  local entry
+  for entry in "${expected[@]}"; do
+    [[ -f "$HOME/.ssh/${entry%%:*}" ]] || return 1
+  done
+  return 0
+}
+
+# Up-to-date unless bc_check_updates says definitively "behind" (rc 2). A
+# network error (rc 1) is treated as healthy so an offline run does not nag.
+_bc_doctor_updates_ok() {
+  local rc
+  bc_check_updates silent >/dev/null 2>&1; rc=$?
+  [[ $rc -ne 2 ]]
+}
+
+# ------------------------------------------------------------------------------
+# Presentation
+# ------------------------------------------------------------------------------
+_bc_doctor_remedy_hint() {
+  case "$1" in
+    apply:*)  echo "drift - chezmoi apply ${1#apply:}" ;;
+    fn:*)     echo "run ${1#fn:}" ;;
+    manual:*) echo "${1#manual:}" ;;
+    *)        echo "$1" ;;
+  esac
+}
+
+# Run one registry row: gate, check, print a status line, record failures.
+#   _bc_doctor_check <label> <gate> <risk> <check_cmd> <remediation>
+_bc_doctor_check() {
+  local label="$1" gate="$2" risk="$3" check="$4" remedy="$5"
+
+  if ! _bc_doctor_gate_ok "$gate"; then
+    bc_log_debug "doctor: skip '$label' (gate: $gate)"
+    return 0
+  fi
+
+  if eval "$check" >/dev/null 2>&1; then
+    printf '  %b✅%b %-15s %bok%b\n' \
+      "$BC_COLOR_GREEN" "$BC_COLOR_RESET" "$label" "$BC_COLOR_GRAY" "$BC_COLOR_RESET"
+  else
+    printf '  %b❌%b %-15s %s\n' \
+      "$BC_COLOR_RED" "$BC_COLOR_RESET" "$label" "$(_bc_doctor_remedy_hint "$remedy")"
+    _BC_DOCTOR_LABELS+=("$label")
+    _BC_DOCTOR_RISKS+=("$risk")
+    _BC_DOCTOR_REMEDIES+=("$remedy")
+  fi
+}
+
+_bc_doctor_usage() {
+  cat <<'EOF'
+bc_doctor - check bash-config health and optionally repair it
+
+  bc_doctor              report only (read-only), offline checks
+  bc_doctor --fix        repair: auto-run safe fixes, prompt for risky ones
+  bc_doctor --fix <name> repair just one check (label shown in the report)
+  bc_doctor --online     also run the network checks (update + atuin server)
+
+Safe fixes run unattended (chezmoi apply of a drifted path, chmod, systemctl
+--user enable). Risky fixes prompt first (sudo trust store, ssh-keygen).
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Fix phase - walk recorded findings. apply: targets are batched into one
+# `chezmoi apply`; fn: fixers run (prompting first when risk=prompt); manual:
+# hints are printed only.
+# ------------------------------------------------------------------------------
+_bc_doctor_apply_fixes() {
+  local only="$1"
+  local -a apply_targets=()
+  local i label risk remedy fn reply
+
+  for i in "${!_BC_DOCTOR_LABELS[@]}"; do
+    label="${_BC_DOCTOR_LABELS[$i]}"
+    risk="${_BC_DOCTOR_RISKS[$i]}"
+    remedy="${_BC_DOCTOR_REMEDIES[$i]}"
+    [[ -n "$only" && "$label" != "$only" ]] && continue
+
+    case "$remedy" in
+      apply:*)
+        apply_targets+=("${remedy#apply:}")
+        ;;
+      fn:*)
+        fn="${remedy#fn:}"
+        if [[ "$risk" == "prompt" ]]; then
+          reply=""
+          read -rp "  Fix '$label' with $fn? (y/N): " reply </dev/tty 2>/dev/null || {
+            bc_log_info "Skipped '$label' (no terminal to confirm)"; continue
+          }
+          [[ "$reply" =~ ^[Yy]$ ]] || { bc_log_info "Skipped '$label'"; continue; }
+        fi
+        bc_log_info "Fixing '$label' -> $fn"
+        "$fn"
+        ;;
+      manual:*)
+        bc_log_info "'$label': ${remedy#manual:}"
+        ;;
+    esac
+  done
+
+  if [[ ${#apply_targets[@]} -gt 0 ]]; then
+    local -a expanded=()
+    local t
+    for t in "${apply_targets[@]}"; do expanded+=("${t/#\~/$HOME}"); done
+    if command -v chezmoi >/dev/null 2>&1; then
+      bc_log_info "Re-applying ${#expanded[@]} chezmoi-managed path(s)"
+      chezmoi apply "${expanded[@]}"
+    else
+      bc_log_error "chezmoi not installed; cannot re-apply: ${expanded[*]}"
+    fi
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# The doctor
+# ------------------------------------------------------------------------------
+bc_doctor() {
+  local do_fix=0 online=0 only=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --fix)
+        do_fix=1
+        if [[ -n "${2:-}" && "$2" != --* ]]; then only="$2"; shift; fi
+        ;;
+      --online)   online=1 ;;
+      -h|--help)  _bc_doctor_usage; return 0 ;;
+      *)          bc_log_warn "bc_doctor: unknown argument '$1' (see --help)" ;;
+    esac
+    shift
+  done
+
+  _BC_DOCTOR_LABELS=()
+  _BC_DOCTOR_RISKS=()
+  _BC_DOCTOR_REMEDIES=()
+  _BC_DOCTOR_ONLINE=$online
+
+  bc_log_info "Config doctor (${BASH_SPECIALISATION:-no specialisation})"
+
+  # --- registry: label | gate | risk | check | remediation ---
+  _bc_doctor_check "config-dir"     always   report "_bc_doctor_have_configdir" \
+    "manual:reinstall bash-config, then run 'chezmoi apply'"
+  _bc_doctor_check "specialisation" spec-set safe   "_bc_doctor_have_spec" \
+    "apply:~/.config/bash-config/specialisation.sh"
+  _bc_doctor_check "git-config"     always   safe   "bc_check_git_config silent" \
+    "apply:~/.gitconfig"
+  _bc_doctor_check "ssh-config"     always   safe   "bc_check_ssh_config silent" \
+    "apply:~/.ssh/config"
+  _bc_doctor_check "ssh-perms"      always   safe   "_bc_doctor_ssh_perms_ok" \
+    "fn:bc_fix_ssh_permissions"
+  _bc_doctor_check "ssh-agent"      systemd  safe   "_bc_doctor_unit_active ssh-agent.service" \
+    "fn:bc_setup_ssh_agent_service"
+  _bc_doctor_check "ssh-keys"       has-keylist prompt "_bc_doctor_ssh_keys_ok" \
+    "fn:bc_setup_ssh_keys"
+  _bc_doctor_check "certs"          frostpaw prompt "bc_check_certs silent" \
+    "fn:bc_setup_certs"
+  _bc_doctor_check "atuin-config"   always   safe   "_bc_doctor_have_atuin_cfg" \
+    "apply:~/.config/atuin/config.toml"
+  _bc_doctor_check "atuin-daemon"   frostpaw-systemd safe "_bc_doctor_unit_active atuin-daemon.service" \
+    "fn:bc_setup_atuin_daemon"
+  _bc_doctor_check "bash-preexec"   always   report "bc_check_bash_preexec" \
+    "manual:source ~/.bashrc, or 'chezmoi apply' to refetch the external"
+  _bc_doctor_check "fastfetch"      always   safe   "_bc_doctor_have_ff_cfg" \
+    "apply:~/.config/fastfetch/config.jsonc"
+  _bc_doctor_check "secrets"        always   report "_bc_doctor_have_secrets" \
+    "manual:'chezmoi apply' to decrypt bash_secrets.sh (may be intentionally absent)"
+
+  if [[ $_BC_DOCTOR_ONLINE -eq 1 ]]; then
+    _bc_doctor_check "updates"         always   report "_bc_doctor_updates_ok" \
+      "manual:review with 'bc_update_config', apply with 'chezmoi update'"
+    _bc_doctor_check "atuin-reachable" frostpaw report "bc_verify_atuin" \
+      "manual:check certs (bc_setup_certs) and daemon (bc_setup_atuin_daemon)"
+  else
+    bc_log_debug "doctor: offline run (pass --online for update + atuin checks)"
+  fi
+
+  local n=${#_BC_DOCTOR_LABELS[@]}
+  echo
+  if [[ $n -eq 0 ]]; then
+    bc_log_success "Everything looks healthy"
+    return 0
+  fi
+
+  if [[ $do_fix -eq 0 ]]; then
+    bc_log_warn "$n issue(s) found. Re-run 'bc_doctor --fix' to repair, or 'bc_doctor --fix <name>' for one."
+    return 1
+  fi
+
+  _bc_doctor_apply_fixes "$only"
+  echo
+  bc_log_info "Re-run 'bc_doctor' to confirm."
+  return 0
+}

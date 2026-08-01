@@ -1,0 +1,612 @@
+#!/bin/bash
+# ==============================================================================
+# SSH MANAGEMENT
+# ==============================================================================
+# Comprehensive SSH management for bash-config including:
+#   - SSH config management (symlink to secrets)
+#   - SSH agent management (key caching via one agent per machine)
+#   - SSH key generation helper (per-machine keys, never stored in git)
+#   - Master connection management (multiplexing via ControlMaster)
+#   - Daily work setup helper
+#   - Diamond SOCKS proxy support
+#
+# Agent design: the agent exists to CACHE UNLOCKED KEYS (so passphrases and
+# YubiKey touches aren't needed on every operation); connection multiplexing
+# is handled separately by ControlMaster in ssh_config. Exactly one agent per
+# machine, by construction: a systemd user service with a fixed socket path
+# where available, otherwise a per-host env-file agent that is reused or
+# replaced (never accumulated). No per-shell EXIT traps; a shared agent must
+# outlive the shell that started it.
+#
+# Quick Commands:
+#   ssh-setup     - Full work day setup (config + agent + master connections)
+#   ssh-status    - Show active master connections
+#   ssh-help      - Detailed help for all SSH functions
+#
+# All functions are prefixed with bc_ for consistency.
+# ==============================================================================
+
+# ==============================================================================
+# SSH CONFIG MANAGEMENT
+# ==============================================================================
+
+# SSH config validation helper
+bc_check_ssh_config() {
+    local silent="${1:-false}"
+    local config_file="$HOME/.ssh/config"
+
+    # chezmoi deploys ~/.ssh/config directly (decrypted from the source), so
+    # this just confirms the file is present and non-empty. The old model,
+    # where the config was a symlink into the secrets submodule, is gone.
+    if [[ ! -s "$config_file" ]]; then
+        [[ "$silent" != "silent" ]] && bc_log_warn "SSH config missing or empty: $config_file (run 'chezmoi apply')"
+        bc_log_debug "SSH config not present: $config_file"
+        return 1
+    fi
+
+    [[ "$silent" != "silent" ]] && bc_log_success "SSH config present: $config_file"
+    bc_log_debug "SSH config validation passed"
+    return 0
+}
+
+# Fix SSH directory and file permissions to meet OpenSSH's strict requirements
+bc_fix_ssh_permissions() {
+    local ssh_dir="$HOME/.ssh"
+
+    chmod 700 "$ssh_dir"                          # Only owner can read/write/enter
+    chmod 600 "$ssh_dir"/config 2>/dev/null       # Only owner can read/write SSH config
+    chmod 600 "$ssh_dir"/id_* 2>/dev/null         # Private keys: owner read/write only
+    chmod 644 "$ssh_dir"/id_*.pub 2>/dev/null     # Public keys: owner read/write, others read
+    chmod 600 "$ssh_dir"/authorized_keys 2>/dev/null  # Authorised keys: owner read/write only
+    chmod 600 "$ssh_dir"/known_hosts 2>/dev/null  # Known hosts: owner read/write only
+
+    bc_log_success "SSH permissions fixed"
+}
+
+# ==============================================================================
+# MASTER CONNECTION MANAGEMENT
+# ==============================================================================
+
+# Simple master connection management
+bc_ssh_master_start() {
+    local host="$1"
+    if [[ -z "$host" ]]; then
+        bc_log_error "Usage: bc_ssh_master_start <hostname>"
+        return 1
+    fi
+    
+    bc_log_debug "Attempting to start master connection to: $host"
+    bc_log_info "Starting master connection to $host..."
+    if ssh -MNf -o LogLevel=ERROR "$host" </dev/null 2>/dev/null; then # Detach from terminal, run in background, suppress output
+        bc_log_success "Master connection to $host started"
+        return 0
+    else
+        bc_log_error "Failed to start master connection to $host"
+        return 1
+    fi
+}
+
+bc_ssh_master_status() {
+    bc_log_debug "Checking for active SSH master connections in ~/.ssh/cm-*"
+    bc_log_info "Active SSH master connections:"
+    if ls ~/.ssh/cm-* 2>/dev/null | head -1 >/dev/null; then
+        bc_log_debug "Found master connection control files"
+        ls -la ~/.ssh/cm-* 2>/dev/null
+    else
+        bc_log_info "No active master connections found"
+        bc_log_debug "No control files matching ~/.ssh/cm-* pattern"
+    fi
+}
+
+bc_ssh_master_stop() {
+    local stopped=0
+    local failed=0
+    bc_log_debug "Closing all SSH master connections via ControlPath sockets"
+    for socket in ~/.ssh/cm-*; do
+        [[ -S "$socket" ]] || continue
+        local label
+        label=$(basename "$socket")
+        if ssh -O exit -o ControlPath="$socket" placeholder 2>/dev/null; then
+            bc_log_success "Closed: $label"
+            ((stopped++))
+        else
+            # Socket may already be dead — remove the stale file
+            rm -f "$socket"
+            bc_log_debug "Removed stale socket: $label"
+            ((failed++))
+        fi
+    done
+    if [[ $stopped -eq 0 && $failed -eq 0 ]]; then
+        bc_log_info "No active master connections found"
+    else
+        [[ $stopped -gt 0 ]] && bc_log_success "Closed $stopped master connection(s)"
+        [[ $failed -gt 0 ]] && bc_log_debug "Removed $failed stale socket(s)"
+    fi
+
+    # Also stop the SOCKS proxy if running
+    diamond-proxy-stop
+}
+
+# ==============================================================================
+# DAILY WORK SETUP
+# ==============================================================================
+
+# Daily work setup - main function for setting up SSH for work
+bc_ssh_workday_setup() {
+    local start_proxy="${1:-false}"
+    local proxy_port="${2:-8080}"
+    
+    bc_log_info "🚀 Setting up SSH for work day..."
+    echo
+    
+    # 1. Attach to the machine's SSH agent (starts one only if needed)
+    bc_log_info "🔐 Attaching to SSH agent..."
+    bc_ssh_agent_attach
+    echo
+    
+    # 2. Confirm the SSH config is deployed (chezmoi owns it now)
+    bc_log_info "📋 Checking SSH configuration..."
+    if bc_check_ssh_config silent; then
+        bc_log_success "SSH config is ready"
+    else
+        bc_log_warn "SSH config missing — run 'chezmoi apply' to deploy it"
+    fi
+    echo
+
+    # 3. Confirm SK key handles and smart-proxy are deployed (chezmoi owns them)
+    bc_log_info "🔑 Checking YubiKey SK key handles..."
+    if [[ -x "$HOME/.ssh/smart-proxy" ]]; then
+        bc_log_success "smart-proxy present"
+    else
+        bc_log_warn "smart-proxy missing — run 'chezmoi apply'"
+    fi
+    echo
+    
+    # 4. Start master connection to bastion (optional — not reachable from inside Diamond)
+    bc_log_info "🏢 Starting bastion master connection..."
+    if ! bc_ssh_master_start bastion; then
+        bc_log_warn "Could not reach bastion — skipping (normal when already on Diamond's internal network)"
+    fi
+    echo
+
+    # 5. Show status
+    bc_log_info "📊 Connection status:"
+    bc_ssh_master_status
+    echo
+
+    bc_log_success "🎉 Work day SSH setup complete!"
+    bc_log_info "💡 All SSH connections will now use the shared master connection"
+
+    # 6. Optionally start Diamond proxy
+    if [[ "$start_proxy" == "true" || "$start_proxy" == "proxy" ]]; then
+        echo
+        bc_log_info "🌐 Starting Diamond SOCKS proxy..."
+        diamond-proxy "$proxy_port"
+    fi
+}
+
+# ==============================================================================
+# SSH AGENT MANAGEMENT
+# ==============================================================================
+# One agent per machine. Preference order in bc_ssh_agent_attach:
+#   1. An already-working agent (inherited env or forwarded from another host)
+#   2. The systemd user service socket (frostpaw/asteria, see
+#      configs/systemd/user/ssh-agent.service, installed by
+#      bc_setup_ssh_agent_service)
+#   3. A per-host env-file agent (diamond, no systemd --user; the env file is
+#      suffixed with the short hostname because the NFS home is shared across
+#      bastion/workstation nodes)
+# Keys are loaded lazily: ssh_config sets AddKeysToAgent yes, so the first use
+# of a key caches it in the agent for every later operation.
+
+# Check if a specific SSH key is loaded in the agent
+bc_is_ssh_key_loaded() {
+    local key_file="$1"
+    if [[ -z "$key_file" || ! -f "$key_file" ]]; then
+        bc_log_debug "Invalid key file provided: $key_file"
+        return 1
+    fi
+
+    bc_log_debug "Checking if SSH key is loaded: $key_file"
+    local key_fingerprint
+    key_fingerprint=$(ssh-keygen -lf "$key_file" 2>/dev/null | awk '{print $2}')
+    bc_log_debug "Key fingerprint: $key_fingerprint"
+
+    if [[ -n "$key_fingerprint" ]] && ssh-add -l 2>/dev/null | grep -q "$key_fingerprint"; then
+        bc_log_debug "Key is loaded in agent"
+        return 0
+    else
+        bc_log_debug "Key is not loaded in agent"
+        return 1
+    fi
+}
+
+# Attach this shell to the machine's single SSH agent (starting one only as a
+# last resort). Idempotent and cheap, called at module load for interactive
+# shells. ssh-add exit codes: 0 = agent has keys, 1 = agent empty (both mean
+# the agent is reachable), 2 = cannot connect.
+bc_ssh_agent_attach() {
+    # rc capture via '|| rc=$?' keeps this safe under 'set -e' callers
+    # (ssh-add exits 1 for a reachable-but-empty agent, which is fine)
+    local rc
+
+    # 1. Inherited or forwarded agent already working? Keep it.
+    if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+        rc=0; ssh-add -l >/dev/null 2>&1 || rc=$?
+        [[ $rc -le 1 ]] && return 0
+        bc_log_debug "Inherited SSH_AUTH_SOCK is dead, discarding: $SSH_AUTH_SOCK"
+        unset SSH_AUTH_SOCK SSH_AGENT_PID
+    fi
+
+    # 2. systemd user service socket (fixed path, singleton by construction)
+    local sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
+    if [[ -S "$sock" ]]; then
+        export SSH_AUTH_SOCK="$sock"
+        bc_log_debug "Attached to systemd ssh-agent socket: $sock"
+        return 0
+    fi
+
+    # 3. File-based fallback for hosts without systemd --user (diamond).
+    #    Per-host env file: the NFS home is shared across bastion/ws nodes.
+    #    $HOSTNAME rather than hostname(1), which isn't installed everywhere.
+    local shorthost="${HOSTNAME:-$(uname -n)}"
+    local envf="$HOME/.ssh/agent-env.${shorthost%%.*}"
+    if [[ -f "$envf" ]]; then
+        # shellcheck source=/dev/null
+        source "$envf" >/dev/null
+        rc=0; ssh-add -l >/dev/null 2>&1 || rc=$?
+        [[ $rc -le 1 ]] && return 0
+        # Stale entry: kill any orphaned agent process before replacing it,
+        # so dead agents never accumulate.
+        bc_log_debug "Env-file agent is dead, replacing (PID: ${SSH_AGENT_PID:-none})"
+        [[ -n "${SSH_AGENT_PID:-}" ]] && kill "$SSH_AGENT_PID" 2>/dev/null
+    fi
+    (umask 077; ssh-agent -s > "$envf")
+    # shellcheck source=/dev/null
+    source "$envf" >/dev/null
+    bc_log_debug "Started new agent for ${shorthost%%.*} (PID: ${SSH_AGENT_PID:-?})"
+}
+
+# Enable the systemd --user unit that owns the machine's ssh-agent. chezmoi
+# deploys the unit file to ~/.config/systemd/user/; this just reloads and
+# enables it. Idempotent — safe to re-run, and part of the post-apply steps
+# when migrating a machine to chezmoi.
+bc_setup_ssh_agent_service() {
+    local unit="$HOME/.config/systemd/user/ssh-agent.service"
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        bc_log_error "systemctl not found, this host does not use systemd"
+        bc_log_info "bc_ssh_agent_attach will use the env-file fallback instead"
+        return 1
+    fi
+    if [[ ! -f "$unit" ]]; then
+        bc_log_error "Unit not deployed: $unit — run 'chezmoi apply' first"
+        return 1
+    fi
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now ssh-agent.service >/dev/null 2>&1
+
+    if [[ "$(systemctl --user is-active ssh-agent.service 2>/dev/null)" == "active" ]]; then
+        bc_log_success "ssh-agent.service active (socket: ${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket)"
+        bc_log_info "New shells attach automatically; run bc_ssh_agent_attach in existing ones"
+    else
+        bc_log_error "ssh-agent.service failed to start"
+        bc_log_info "Inspect: systemctl --user status ssh-agent.service"
+        return 1
+    fi
+}
+
+# Kill any user-owned ssh-agent processes that are NOT the managed one
+# (the systemd service or the current env-file agent). Visibility + manual
+# safety valve against agent pileup.
+bc_ssh_agent_prune() {
+    local -a agents=()
+    mapfile -t agents < <(pgrep -u "$USER" -x ssh-agent 2>/dev/null)
+    if [[ ${#agents[@]} -eq 0 ]]; then
+        bc_log_info "No ssh-agent processes running"
+        return 0
+    fi
+
+    # The systemd-managed agent's PID (if the service is running)
+    local systemd_pid=""
+    if command -v systemctl >/dev/null 2>&1; then
+        systemd_pid=$(systemctl --user show ssh-agent.service -p MainPID --value 2>/dev/null)
+    fi
+
+    # Counters use var=$((var+1)) rather than ((var++)), which returns
+    # status 1 at zero and would abort 'set -e' callers
+    local killed=0 kept=0
+    local pid
+    for pid in "${agents[@]}"; do
+        if [[ -n "$systemd_pid" && "$pid" == "$systemd_pid" ]]; then
+            bc_log_debug "Keeping systemd agent (PID: $pid)"
+            kept=$((kept+1))
+            continue
+        fi
+        if [[ -n "${SSH_AGENT_PID:-}" && "$pid" == "$SSH_AGENT_PID" ]]; then
+            bc_log_debug "Keeping current session's env-file agent (PID: $pid)"
+            kept=$((kept+1))
+            continue
+        fi
+        if kill "$pid" 2>/dev/null; then
+            bc_log_debug "Killed stray ssh-agent (PID: $pid)"
+            killed=$((killed+1))
+        fi
+    done
+
+    if [[ $killed -gt 0 ]]; then
+        bc_log_success "Pruned $killed stray ssh-agent process(es), kept $kept"
+    else
+        bc_log_info "No stray agents to prune ($kept managed agent(s) running)"
+    fi
+}
+
+# Show the machine's agent state: source, socket, loaded keys, process count
+bc_ssh_agent_status() {
+    bc_log_info "SSH Agent Status"
+
+    local -a agents=()
+    mapfile -t agents < <(pgrep -u "$USER" -x ssh-agent 2>/dev/null)
+    echo -e "  ${BC_COLOR_BLUE}ssh-agent processes for $USER: ${#agents[@]}${BC_COLOR_RESET}"
+    if [[ ${#agents[@]} -gt 1 ]]; then
+        echo -e "  ${BC_COLOR_YELLOW}More than one agent running, consider bc_ssh_agent_prune${BC_COLOR_RESET}"
+    fi
+
+    if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+        echo -e "  ${BC_COLOR_RED}This shell has no agent (SSH_AUTH_SOCK unset), run bc_ssh_agent_attach${BC_COLOR_RESET}"
+        return 1
+    fi
+
+    local source_desc="inherited/forwarded"
+    local systemd_sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
+    if [[ "$SSH_AUTH_SOCK" == "$systemd_sock" ]]; then
+        source_desc="systemd user service"
+    elif [[ -n "${SSH_AGENT_PID:-}" ]]; then
+        source_desc="env-file agent (PID: $SSH_AGENT_PID)"
+    fi
+    echo -e "  ${BC_COLOR_GREEN}Socket: $SSH_AUTH_SOCK ($source_desc)${BC_COLOR_RESET}"
+
+    local keys rc=0
+    keys=$(ssh-add -l 2>/dev/null) || rc=$?
+    case $rc in
+        0)
+            echo -e "  ${BC_COLOR_GREEN}Loaded keys:${BC_COLOR_RESET}"
+            echo "$keys" | sed 's/^/    /'
+            ;;
+        1)
+            echo -e "  ${BC_COLOR_YELLOW}Agent reachable, no keys loaded yet${BC_COLOR_RESET}"
+            echo -e "  ${BC_COLOR_GRAY}Keys load automatically on first use (AddKeysToAgent yes)${BC_COLOR_RESET}"
+            ;;
+        *)
+            echo -e "  ${BC_COLOR_RED}Cannot reach agent at $SSH_AUTH_SOCK, run bc_ssh_agent_attach${BC_COLOR_RESET}"
+            return 1
+            ;;
+    esac
+}
+
+# ==============================================================================
+# SSH KEY GENERATION
+# ==============================================================================
+
+# Generate the per-machine private keys this specialisation is expected to
+# have, under the filenames ssh_config already probes for (Match exec test -f).
+# Private keys are per-machine and NEVER stored in git; only public keys
+# leave the machine. Interactive: ssh-keygen prompts for a passphrase, which
+# the agent then caches (AddKeysToAgent yes) so it's needed once per boot.
+# Echo the "keyname:description" list this specialisation is expected to have,
+# one per line. Empty output + return 1 for an unknown specialisation. Single
+# source of truth for both bc_setup_ssh_keys and the config doctor's key probe.
+_bc_ssh_expected_keys() {
+    case "${BASH_SPECIALISATION:-}" in
+        frostpaw)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
+                "id_ed25519_github_s:GitHub second account"
+            ;;
+        asteria)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
+            ;;
+        diamond)
+            printf '%s\n' \
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+bc_setup_ssh_keys() {
+    local host="${HOSTNAME:-$(uname -n)}"
+    host="${host%%.*}"
+    # key name → description shown when offering to generate it
+    local -a expected=()
+    mapfile -t expected < <(_bc_ssh_expected_keys)
+    if [[ ${#expected[@]} -eq 0 ]]; then
+        bc_log_warn "Unknown specialisation '${BASH_SPECIALISATION:-}', no key list defined"
+        return 1
+    fi
+
+    local entry key desc keyfile generated=0
+    local -a new_keys=()
+    for entry in "${expected[@]}"; do
+        key="${entry%%:*}"
+        desc="${entry#*:}"
+        keyfile="$HOME/.ssh/$key"
+        if [[ -f "$keyfile" ]]; then
+            bc_log_debug "Key already exists: $key"
+            continue
+        fi
+        echo
+        bc_log_info "Missing key: $key ($desc)"
+        local reply=""
+        read -rp "  Generate it now? (y/N): " reply </dev/tty || return 0
+        [[ "$reply" =~ ^[Yy]$ ]] || continue
+        # Passphrase prompt comes from ssh-keygen itself; agent caches it later
+        if ssh-keygen -t ed25519 -f "$keyfile" -C "$host-${key#id_ed25519_}-$(date +%Y%m)"; then
+            new_keys+=("$key")
+            generated=$((generated+1))
+        else
+            bc_log_error "ssh-keygen failed for $key"
+        fi
+    done
+
+    if [[ $generated -eq 0 ]]; then
+        echo
+        bc_log_success "All expected keys for '${BASH_SPECIALISATION:-}' are present"
+        return 0
+    fi
+
+    echo
+    bc_log_success "Generated $generated key(s). Public keys to deploy:"
+    for key in "${new_keys[@]}"; do
+        echo
+        case "$key" in
+            id_ed25519_github_d)
+                echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub main account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
+            id_ed25519_github_s)
+                echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub second account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
+            *)
+                echo -e "  ${BC_COLOR_CYAN}$key.pub → deploy to the matching host's authorized_keys${BC_COLOR_RESET}" ;;
+        esac
+        cat "$HOME/.ssh/$key.pub" | sed 's/^/    /'
+    done
+}
+
+# ==============================================================================
+# HELP SYSTEM
+# ==============================================================================
+
+# SSH agent management help
+bc_ssh_help() {
+    echo -e "${BC_COLOR_CYAN}🔑 SSH Management Help:${BC_COLOR_RESET}"
+    echo
+    echo -e "${BC_COLOR_BLUE}Connection Management:${BC_COLOR_RESET}"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_workday_setup${BC_COLOR_RESET}"
+    echo -e "    Complete work day setup (config + master connections)"
+    echo -e "  ${BC_COLOR_GREEN}bc_check_ssh_config [silent]${BC_COLOR_RESET}"
+    echo -e "    Check the chezmoi-deployed ~/.ssh/config is present"
+    echo -e "  ${BC_COLOR_GREEN}bc_fix_ssh_permissions${BC_COLOR_RESET}"
+    echo -e "    Fix ~/.ssh directory and file permissions to meet OpenSSH requirements"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_master_start <host>${BC_COLOR_RESET}"
+    echo -e "    Start master connection to host"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_master_status${BC_COLOR_RESET}"
+    echo -e "    Show active master connections"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_master_stop${BC_COLOR_RESET}"
+    echo -e "    Close all active master connections"
+    echo
+    echo -e "${BC_COLOR_BLUE}Agent & Keys:${BC_COLOR_RESET}"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_agent_attach${BC_COLOR_RESET}"
+    echo -e "    Attach this shell to the machine's single SSH agent (runs at shell startup)"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_agent_status${BC_COLOR_RESET}"
+    echo -e "    Show agent source, socket, loaded keys, and agent process count"
+    echo -e "  ${BC_COLOR_GREEN}bc_ssh_agent_prune${BC_COLOR_RESET}"
+    echo -e "    Kill stray ssh-agent processes (keeps the managed one)"
+    echo -e "  ${BC_COLOR_GREEN}bc_setup_ssh_agent_service${BC_COLOR_RESET}"
+    echo -e "    Install/enable the systemd --user ssh-agent unit (frostpaw/asteria)"
+    echo -e "  ${BC_COLOR_GREEN}bc_setup_ssh_keys${BC_COLOR_RESET}"
+    echo -e "    Generate this machine's expected keys and print pubkeys to deploy"
+    echo -e "  ${BC_COLOR_GREEN}bc_is_ssh_key_loaded <key_file>${BC_COLOR_RESET}"
+    echo -e "    Check if a specific SSH key is loaded in the current agent"
+    echo
+    echo -e "${BC_COLOR_BLUE}Quick Aliases:${BC_COLOR_RESET}"
+    echo -e "  ${BC_COLOR_GREEN}ssh-setup${BC_COLOR_RESET}           → bc_ssh_workday_setup (starts proxy in background)"
+    echo -e "  ${BC_COLOR_GREEN}ssh-fix-perms${BC_COLOR_RESET}       → bc_fix_ssh_permissions"
+    echo -e "  ${BC_COLOR_GREEN}ssh-status${BC_COLOR_RESET}          → bc_ssh_master_status"
+    echo -e "  ${BC_COLOR_GREEN}ssh-master${BC_COLOR_RESET}          → bc_ssh_master_start"
+    echo -e "  ${BC_COLOR_GREEN}ssh-exit${BC_COLOR_RESET}            → bc_ssh_master_stop (also stops SOCKS proxy)"
+    echo -e "  ${BC_COLOR_GREEN}diamond-proxy [port]${BC_COLOR_RESET} → start SOCKS proxy in background (default: 8080)"
+    echo -e "  ${BC_COLOR_GREEN}diamond-proxy-stop${BC_COLOR_RESET}  → stop background SOCKS proxy"
+    echo -e "  ${BC_COLOR_GREEN}ssh-help${BC_COLOR_RESET}            → bc_ssh_help"
+    echo
+    echo -e "${BC_COLOR_BLUE}Examples:${BC_COLOR_RESET}"
+    echo -e "  ${BC_COLOR_GRAY}# Full work day setup${BC_COLOR_RESET}"
+    echo -e "  ssh-setup"
+    echo -e "  ${BC_COLOR_GRAY}# Check agent status / clean up strays${BC_COLOR_RESET}"
+    echo -e "  bc_ssh_agent_status"
+    echo -e "  bc_ssh_agent_prune"
+    echo -e "  ${BC_COLOR_GRAY}# Generate this machine's missing keys${BC_COLOR_RESET}"
+    echo -e "  bc_setup_ssh_keys"
+    echo
+    echo -e "${BC_COLOR_BLUE}Notes:${BC_COLOR_RESET}"
+    echo -e "  • The agent caches unlocked keys (passphrase/touch once per boot, not per use)"
+    echo -e "  • Connection multiplexing is separate, handled by ControlMaster in ssh_config"
+    echo -e "  • AddKeysToAgent yes in ssh_config loads keys into the agent on first use"
+    echo -e "  • One agent per machine: systemd user service, or env-file fallback on diamond"
+}
+
+# ==============================================================================
+# DIAMOND-SPECIFIC PROXY FUNCTIONS
+# ==============================================================================
+
+# Diamond SOCKS proxy functions (for accessing Diamond intranet from local machine)
+# Start Diamond SOCKS proxy for web browsing (runs in background)
+diamond-proxy() {
+    local port="${1:-8080}"
+    local pid_file="$HOME/.diamond-proxy.pid"
+
+    # Check if already running
+    if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+        bc_log_warn "SOCKS proxy already running on port $port (PID: $(cat "$pid_file"))"
+        return 0
+    fi
+
+    bc_log_info "Starting SOCKS proxy on port $port..."
+    ssh -D "$port" -C -N -q bastion </dev/null >/dev/null 2>&1 & # Detach from terminal, run in background
+    local proxy_pid=$!
+    disown "$proxy_pid"
+    echo "$proxy_pid" > "$pid_file"
+    bc_log_success "SOCKS proxy running on port $port (PID: $proxy_pid)"
+    echo "Configure FoxyProxy: SOCKS5 127.0.0.1:$port — patterns: *.diamond.ac.uk, *.diamond"
+    echo "Run 'ssh-exit' or 'diamond-proxy-stop' to stop"
+}
+
+# Stop the background SOCKS proxy
+diamond-proxy-stop() {
+    local pid_file="$HOME/.diamond-proxy.pid"
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid=$(cat "$pid_file")
+        if kill "$pid" 2>/dev/null; then
+            bc_log_success "SOCKS proxy stopped (PID: $pid)"
+        else
+            bc_log_debug "Proxy process already gone (PID: $pid)"
+        fi
+        rm -f "$pid_file"
+    else
+        bc_log_debug "No SOCKS proxy PID file found"
+    fi
+}
+
+# List all active Diamond SSH connections
+diamond-proxy-list() {
+    bc_log_info "Active Diamond SSH connections:"
+    pgrep -af "ssh.*diamond" 2>/dev/null || echo "No active Diamond SSH connections found"
+}
+
+# ==============================================================================
+# QUICK ALIASES
+# ==============================================================================
+
+# Simple aliases for common operations
+alias ssh-setup='bc_ssh_workday_setup proxy'
+alias ssh-setup-only='bc_ssh_workday_setup false'
+alias ssh-fix-perms='bc_fix_ssh_permissions'
+alias ssh-status='bc_ssh_master_status'
+alias ssh-master='bc_ssh_master_start'
+alias ssh-exit='bc_ssh_master_stop'
+alias ssh-agent-status='bc_ssh_agent_status'
+alias ssh-agent-prune='bc_ssh_agent_prune'
+alias ssh-help='bc_ssh_help'
+
+# ==============================================================================
+# MODULE INITIALISATION
+# ==============================================================================
+
+# Attach interactive shells to the machine's agent so AddKeysToAgent has
+# somewhere to cache keys. Idempotent; reuses before it ever starts anything.
+if [[ $- == *i* ]]; then
+    bc_ssh_agent_attach
+fi

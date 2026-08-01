@@ -1,133 +1,26 @@
-#!/bin/bash
+# Pleiades compatibility stub
 # ==============================================================================
-# BASHRC CORE - Main Orchestrator
-# ==============================================================================
-# Central configuration loader for bash-config system.
-# This file is typically symlinked to ~/.bashrc_core and sourced from ~/.bashrc.
+# This repo is now managed by chezmoi. The modular config no longer lives at
+# the repo root; chezmoi deploys it to ~/.config/bash-config and rewrites the
+# managed block in ~/.bashrc to source it from there.
 #
-# Load Order:
-#   1. bash_logging             - Color constants and bc_log_* functions (loaded first)
-#   2. secrets/bash_secrets.sh  - Sensitive credentials (gitignored)
-#   3. bash_aliases             - Shared aliases
-#   4. bash_exports             - Shared environment variables
-#   5. bash_prompt              - Prompt configuration
-#   6. bash_tools               - Utility functions
-#   7. bash_ssh                 - SSH management
-#   8. bash_history             - History management
-#   9. bash_config_update       - bash-config repo self-update (bc_check_updates, bc_update_config)
-#  10. specialisations/bashrc_* - Machine-specific configuration
+# This file only exists to catch a machine that still has the old
+# `~/.bashrc_core -> <checkout>/bashrc_core` symlink and pulled the migration
+# before running the chezmoi bootstrap. Instead of the shell breaking on a
+# vanished orchestrator, you get told what to run. Delete this stub once every
+# machine has been migrated.
 #
-# Environment Variables:
-#   BASH_SPECIALISATION  - Set in ~/.bashrc to select specialisation
-#   BASH_CONFIG_DIR      - Auto-detected directory of this config
-#   BASH_CONFIG_DEBUG    - Set to "true" to enable debug logging
+# Migration runbook: docs/migrating_to_chezmoi.md
 # ==============================================================================
 
-export BASH_CONFIG_VERSION="2.0.0"
-
-# ==============================================================================
-# PATH RESOLUTION
-# ==============================================================================
-# Resolve the real path of this script (handles symlinks)
-__realpath() {
-  local path="$1"
-  while [ -L "$path" ]; do
-    path="$(readlink "$path")"
-    [[ "$path" != /* ]] && path="$(dirname "$1")/$path"
-  done
-  cd "$(dirname "$path")" && pwd
-}
-
-export BASH_CONFIG_DIR="${BASH_CONFIG_DIR:-$(__realpath "${BASH_SOURCE[0]}")}"
-
-# Validate configuration directory
-if [[ ! -d "$BASH_CONFIG_DIR" ]]; then
-  echo "[ERROR] BASH_CONFIG_DIR not found: $BASH_CONFIG_DIR" >&2
-  return 1 2>/dev/null || exit 1
-fi
-
-# ==============================================================================
-# MODULE LOADER
-# ==============================================================================
-# Source a file if it exists, with optional description for warnings
-bc_source_if_exists() {
-  local file="$1"
-  local description="${2:-$file}"
-  if [[ -f "$file" ]]; then
-    source "$file"
-  else
-    echo "[WARN] $description not found: $file" >&2
-  fi
-}
-
-# Load core modules
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_logging" "Logging"
-bc_source_if_exists "$BASH_CONFIG_DIR/secrets/bash_secrets.sh" "Secrets file"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_aliases" "Aliases"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_exports" "Exports"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_prompt" "Prompt configuration"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_tools" "Tools and functions"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_certs" "Certificate management"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_ssh" "SSH management"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_history" "History management"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_update" "Update utilities"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_config_update" "Config self-update"
-bc_source_if_exists "$BASH_CONFIG_DIR/bash_project" "Project workspace management"
-
-# ==============================================================================
-# SPECIALISATION LOADER
-# ==============================================================================
-if [[ -n "${BASH_SPECIALISATION:-}" ]]; then
-  spec_file="$BASH_CONFIG_DIR/specialisations/bashrc_$BASH_SPECIALISATION"
-  case "$BASH_SPECIALISATION" in
-    frostpaw|diamond|asteria)
-      if [[ -f "$spec_file" ]]; then
-        source "$spec_file"
-      else
-        echo "[ERROR] Specialisation file not found: $spec_file" >&2
-      fi
-      ;;
-    *)
-      echo "[ERROR] Unknown specialisation: $BASH_SPECIALISATION" >&2
-      echo "[INFO] Available specialisations: frostpaw, diamond, asteria" >&2
-      ;;
-  esac
-fi
-
-# ==============================================================================
-# INITIALIZATION
-# ==============================================================================
-# Initialize prompt and history PROMPT_COMMAND
-# set_prompt runs once to build the initial PS1, then PROMPT_COMMAND is set so
-# it re-runs before every prompt.  bc_history_init() appends its own hooks
-# *after* this assignment, so ordering is guaranteed correct.
-set_prompt
-PROMPT_COMMAND="set_prompt"
-
-# Load bash-preexec so atuin's precmd/preexec hooks are active.
-# Delegates to bc_source_bash_preexec (defined in bash_history) which checks
-# system package paths, $HOME install, and the repo submodule in order.
-if declare -f bc_source_bash_preexec >/dev/null 2>&1; then
-  bc_source_bash_preexec
-fi
-
-if declare -f bc_history_init >/dev/null 2>&1; then
-  bc_history_init
-fi
-
-# Interactive shell features
 if [[ $- == *i* ]]; then
-  # Show system info on login
-  bc_ff
-  
-  # Daily update check (only on real terminals, not scripts/pipes)
-  if [[ -t 0 ]]; then
-    update_check_file="$BASH_CONFIG_DIR/.last_update_check"
-    current_date=$(date +%Y%m%d)
-    
-    if [[ ! -f "$update_check_file" ]] || [[ "$(cat "$update_check_file" 2>/dev/null)" != "$current_date" ]]; then
-      bc_check_updates notify
-      echo "$current_date" > "$update_check_file"
-    fi
-  fi
+    printf '\n\033[1;33m[pleiades]\033[0m This repo is now managed by chezmoi.\n'
+    printf '  The old ~/.bashrc_core symlink is obsolete and this shell is unconfigured.\n'
+    printf '  Migrate this machine (see docs/migrating_to_chezmoi.md):\n'
+    printf '    sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades\n'
+    printf '    cp <your age key> ~/.config/chezmoi/key.txt   # from Vaultwarden\n'
+    printf '    chezmoi apply\n\n'
 fi
+
+# Sourced from ~/.bashrc; return cleanly so the login shell still works.
+return 0 2>/dev/null || true

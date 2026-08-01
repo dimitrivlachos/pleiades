@@ -1,0 +1,31 @@
+# Managed by chezmoi (home/dot_gitconfig.tmpl). Do not edit ~/.gitconfig by
+# hand; edit the template. The identity fragments included below are
+# decrypted by chezmoi into ~/.config/bash-config/ (see the source files
+# encrypted_private_gitconfig_user_public / _private). git expands the
+# leading ~ in include paths.
+
+# Base configuration (aliases, core, colours) - shared by every machine.
+[include]
+    path = ~/.config/bash-config/gitconfig_base
+
+{{ if eq .specialisation "diamond" -}}
+# Diamond: always commit under the public (work) identity.
+[include]
+    path = ~/.config/bash-config/gitconfig_user_public
+{{- else -}}
+# Personal machines: choose the identity from the GitHub account the repo's
+# remote points at. A repo whose remote matches neither alias gets no managed
+# identity, exactly as before.
+[includeIf "hasconfig:remote.*.url:git@github.com-d:*/**"]
+    path = ~/.config/bash-config/gitconfig_user_public
+[includeIf "hasconfig:remote.*.url:https://github.com-d/**"]
+    path = ~/.config/bash-config/gitconfig_user_public
+[includeIf "hasconfig:remote.*.url:git@github.com-s:*/**"]
+    path = ~/.config/bash-config/gitconfig_user_private
+[includeIf "hasconfig:remote.*.url:https://github.com-s/**"]
+    path = ~/.config/bash-config/gitconfig_user_private
+{{- end }}
+
+# Local per-machine overrides, if present (never managed by chezmoi).
+[include]
+    path = ~/.gitconfig.local

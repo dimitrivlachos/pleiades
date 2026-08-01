@@ -1,0 +1,26 @@
+#!/bin/bash
+# chezmoi modify_ script for ~/.bashrc.
+#
+# chezmoi feeds the current ~/.bashrc on stdin (empty if it does not exist yet);
+# our stdout replaces it. We refresh only the bash-config managed block and keep
+# everything else: the distro skeleton and any personal edits. This mirrors what
+# the old install.sh did with sed, so it is safe across the distros the frostpaw
+# specialisation spans (Ubuntu, Arch, Debian).
+set -euo pipefail
+
+BEGIN='# >>> bash-config initialize >>>'
+END='# <<< bash-config initialize <<<'
+
+# Drop any previous managed block (inclusive of its markers), then trim trailing
+# blank lines so re-applies do not accumulate whitespace before the fresh block.
+body="$(sed "/$BEGIN/,/$END/d")"
+body="$(printf '%s\n' "$body" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba}')"
+
+printf '%s\n\n' "$body"
+cat <<EOF
+$BEGIN
+# !! Managed by chezmoi (home/modify_dot_bashrc.tmpl). Do not edit inside markers. !!
+export BASH_SPECIALISATION="{{ .specialisation }}"
+source "\$HOME/.config/bash-config/bashrc_core"
+$END
+EOF

@@ -1,5 +1,5 @@
-secrets/*
-!secrets/
-!secrets/*.template
-!secrets/README.md
-.last_update_check
+# The secrets submodule is dissolved on this branch; its contents are now
+# age-encrypted under home/. The old working tree is left on disk (it holds
+# real plaintext, including the pre-rotation API key) but must never be
+# tracked here.
+/secrets/

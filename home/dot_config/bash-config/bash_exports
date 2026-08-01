@@ -1,0 +1,63 @@
+#!/bin/bash
+# ==============================================================================
+# SHARED ENVIRONMENT EXPORTS
+# ==============================================================================
+# Environment variables shared across all systems/specialisations.
+# Machine-specific exports should be defined in:
+#   - bash_secrets.sh (encrypted, for sensitive values)
+#   - home/.chezmoitemplates/specialisation-* (for machine-specific configs)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Prompt Configuration (used by bash_prompt)
+# ------------------------------------------------------------------------------
+export SHOW_GIT_BRANCH=0       # Toggle: show git branch in prompt (0=off, 1=on)
+export SHOW_VENV=1             # Toggle: show conda/venv in prompt (0=off, 1=on)
+# SHOW_EMOJIS is auto-detected in bash_prompt based on terminal capabilities
+#export SHOW_EMOJIS=0           # Toggle: show emojis in prompt (0=off, 1=on)
+unset SHOW_EMOJIS              # Let bash_prompt auto-detect emoji support
+export DIR_LENGTH="short"      # Directory display: "short" (\W) or "long" (\w)
+
+# ------------------------------------------------------------------------------
+# Build Tools
+# ------------------------------------------------------------------------------
+export CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}"
+
+# ------------------------------------------------------------------------------
+# PATH
+# ------------------------------------------------------------------------------
+# Guard against duplicate entries when opening multiple terminals (each sources this file)
+[[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+# On Diamond, $HOME is a network home distinct from the science volume; prepend the
+# science-volume .local/bin so user-installed binaries (e.g. tmux) take precedence.
+if [[ -n "${DIAMOND_USERNAME:-}" ]]; then
+  _dls_local="/dls/science/users/$DIAMOND_USERNAME/.local/bin"
+  [[ ":$PATH:" != *":$_dls_local:"* ]] && [[ -d "$_dls_local" ]] && export PATH="$_dls_local:$PATH"
+  unset _dls_local
+fi
+
+# ------------------------------------------------------------------------------
+# Pixi package manager
+# ------------------------------------------------------------------------------
+# DIAMOND_USERNAME (set in bash_secrets.sh) shifts the install root to the
+# science volume; everywhere else the standard ~/.pixi location is used.
+if [[ -n "${DIAMOND_USERNAME:-}" ]]; then
+  export PIXI_HOME="/dls/science/users/$DIAMOND_USERNAME/.pixi"
+else
+  export PIXI_HOME="${PIXI_HOME:-$HOME/.pixi}"
+fi
+export PIXI_CACHE_DIR="$PIXI_HOME/cache"
+[[ ":$PATH:" != *":$PIXI_HOME/bin:"* ]] && [[ -d "$PIXI_HOME/bin" ]] && \
+  export PATH="$PIXI_HOME/bin:$PATH"
+
+# ------------------------------------------------------------------------------
+# Atuin (shell history sync)
+# ------------------------------------------------------------------------------
+# Must be sourced here (before bash_history) so that `command -v atuin` in
+# bash_history resolves correctly and BC_ATUIN_ACTIVE is set to 1.
+# The env script has its own PATH dedup guard built in.
+[[ -f "$HOME/.atuin/bin/env" ]] && . "$HOME/.atuin/bin/env"
+
+# Atuin reads ~/.config/atuin/config.toml by default; chezmoi deploys the
+# per-machine config there (see home/dot_config/atuin/config.toml.tmpl), so
+# no ATUIN_CONFIG_DIR override is needed.
