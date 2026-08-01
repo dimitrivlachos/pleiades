@@ -402,13 +402,11 @@ _bc_ssh_expected_keys() {
         frostpaw)
             printf '%s\n' \
                 "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
-                "id_ed25519_github_s:GitHub second account" \
-                "id_ed25519_personal:personal hosts (asteria/acrux/lyra/polaris/spark/atlas)"
+                "id_ed25519_github_s:GitHub second account"
             ;;
         asteria)
             printf '%s\n' \
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
-                "id_ed25519_personal:personal hosts (acrux/lyra/polaris/spark/atlas)"
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
             ;;
         diamond)
             printf '%s\n' \
@@ -470,8 +468,6 @@ bc_setup_ssh_keys() {
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub main account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
             id_ed25519_github_s)
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub second account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
-            id_ed25519_personal)
-                echo -e "  ${BC_COLOR_CYAN}$key.pub → each personal host: ssh-copy-id -i ~/.ssh/$key.pub <host>${BC_COLOR_RESET}" ;;
             *)
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → deploy to the matching host's authorized_keys${BC_COLOR_RESET}" ;;
         esac
