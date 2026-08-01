@@ -129,7 +129,7 @@ bash-config/                 (git repo root)
 # 2. place the age key
 install -Dm600 key.txt ~/.config/chezmoi/key.txt
 # 3. clone, prompt for specialisation, decrypt, apply
-chezmoi init --apply github.com/dimitrivlachos/bash-config
+chezmoi init --apply github.com/dimitrivlachos/pleiades
 ```
 
 No `github.com-d` alias needed first: the repo is one public repo with
