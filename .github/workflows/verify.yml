@@ -81,6 +81,7 @@ jobs:
       - name: Secret files must be encrypted
         run: |
           offenders="$(git ls-files -- '*bash_secrets.sh' '*gitconfig_user_*' '*id_ed25519_*' \
+                        '*dot_claude/*' \
                         | grep -v '\.age$' || true)"
           if [ -n "$offenders" ]; then
             echo "$offenders" | sed 's/^/::error::plaintext secret (must be encrypted_*.age): /'

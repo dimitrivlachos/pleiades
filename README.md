@@ -41,6 +41,7 @@ pleiades/
 │   │   ├── atuin/config.toml.tmpl       # -> ~/.config/atuin/ (homelab or diamond)
 │   │   ├── tmux/tmux.conf          # -> ~/.config/tmux/
 │   │   └── systemd/user/           # atuin-daemon + ssh-agent units
+│   ├── private_dot_claude/         # ~/.claude/CLAUDE.md (encrypted template)
 │   └── private_dot_ssh/            # ssh config + SK handles (encrypted)
 └── docs/
     ├── chezmoi_migration.md        # the migration plan
@@ -174,6 +175,7 @@ and decrypted on apply into `~/.config/bash-config/`:
 - `bash_secrets.sh` – usernames, key paths, tokens
 - `gitconfig_user_public` / `gitconfig_user_private` – git identities
 - `~/.ssh/config` and the SK key handles
+- `~/.claude/CLAUDE.md` – see [Claude instructions](#-claude-instructions)
 
 The single age identity lives at `~/.config/chezmoi/key.txt` on each
 machine (copied out-of-band from Vaultwarden, never committed). Because
@@ -185,6 +187,29 @@ To edit a secret:
 chezmoi edit ~/.config/bash-config/bash_secrets.sh   # decrypts, re-encrypts on save
 chezmoi apply
 ```
+
+chezmoi decrypts to a private temporary directory, invokes the editor on
+the plaintext, and re-encrypts on exit. An edit that changes nothing
+leaves the ciphertext byte-identical, so opening a file just to read it
+does not churn the repo. `.tmpl` extensions are preserved for the
+editor's benefit.
+
+### Editing in VS Code
+
+`$EDITOR` is not set by this config, so chezmoi falls back to `vi`. To
+edit a secret as a tab in the current window instead:
+
+```bash
+EDITOR="code --wait" chezmoi edit --apply ~/.claude/CLAUDE.md
+```
+
+`--wait` is required. Without it `code` returns immediately, chezmoi
+treats the edit as finished and re-encrypts the untouched file, and
+whatever you type afterwards is lost. `--apply` re-renders the target on
+save so the result is visible straight away.
+
+Opening the `.age` file directly from the explorer shows the armored
+ciphertext, which is the point - always go through `chezmoi edit`.
 
 ---
 
@@ -212,6 +237,35 @@ git cm "message"   # commit with message
 git l              # compact log with graph
 git undo           # undo last commit (keeps changes)
 ```
+
+---
+
+## 🤖 Claude instructions
+
+`~/.claude/CLAUDE.md` is the global instruction file Claude Code reads on
+every session. It is an encrypted template
+(`private_dot_claude/encrypted_private_CLAUDE.md.tmpl.age`), so it is both
+decrypted and rendered on apply.
+
+```bash
+chezmoi edit --apply ~/.claude/CLAUDE.md   # decrypts, re-encrypts on save
+```
+
+See [Editing in VS Code](#editing-in-vs-code) for opening it as a tab
+rather than in `vi`.
+
+To preview what the other machines will see:
+
+```bash
+cfg="$(mktemp -d)/chezmoi.toml"
+printf '[data]\n    specialisation = "diamond"\n' > "$cfg"
+chezmoi --config "$cfg" execute-template < <(chezmoi decrypt \
+  < home/private_dot_claude/encrypted_private_CLAUDE.md.tmpl.age)
+```
+
+Note that CI renders every specialisation with `--exclude=encrypted`, so
+this template is never parsed there. A syntax error in it is caught only
+by the command above or by `chezmoi apply` on a real machine.
 
 ---
 
