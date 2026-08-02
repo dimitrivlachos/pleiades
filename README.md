@@ -64,6 +64,15 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
 This installs chezmoi, clones the source, prompts for the machine
 specialisation, and writes `~/.config/chezmoi/chezmoi.toml`.
 
+That generated config pins `umask = 0o022`. chezmoi otherwise takes the
+target file modes from the umask of whichever process runs `apply`, so
+on a distribution defaulting to `002` every dotfile would come out
+group-writable, and a later apply from a cron job or systemd unit with
+a different umask would show the whole tree as modified. Editing
+`home/.chezmoi.toml.tmpl` does not update an existing config; re-run
+`chezmoi init` to regenerate it, which will not re-prompt for the
+specialisation.
+
 ### 2. Drop the age key in place
 
 ```bash

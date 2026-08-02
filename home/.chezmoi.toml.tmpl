@@ -11,6 +11,16 @@
 # Vaultwarden). Only the public recipient is safe to keep in this repo.
 encryption = "age"
 
+# --- File modes ---
+# chezmoi derives target modes from the umask of the process running apply
+# (0666 &^ umask for files, 0777 &^ umask for directories) rather than from
+# the mode of the file in the source tree. Distributions that use private
+# user groups default to 002, which would make every dotfile group-writable
+# and leave the modes dependent on which shell, cron job or unit last ran
+# apply. Pinning the umask here keeps them a property of this repo. Same
+# placement rule as above: this must stay above [age].
+umask = 0o022
+
 [age]
     identity = "~/.config/chezmoi/key.txt"
     recipient = "age1n60ac334hj797aws94vs4lhkfhwmatku5ssmvw0rq0sj5w43u9pqlrerzs"
