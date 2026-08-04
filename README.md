@@ -39,6 +39,7 @@ pleiades/
 │   │   │   └── encrypted_*.age     # secrets (bash_secrets, git identities)
 │   │   ├── fastfetch/config.jsonc.tmpl  # -> ~/.config/fastfetch/ (per machine+arch)
 │   │   ├── atuin/config.toml.tmpl       # -> ~/.config/atuin/ (homelab or diamond)
+│   │   ├── opencode/opencode.jsonc      # -> ~/.config/opencode/ (endpoints via env)
 │   │   ├── tmux/tmux.conf          # -> ~/.config/tmux/
 │   │   └── systemd/user/           # atuin-daemon + ssh-agent units
 │   ├── private_dot_claude/         # ~/.claude/CLAUDE.md (encrypted template)
@@ -131,8 +132,9 @@ A daily login check nudges you when the source is behind upstream.
 ## 🩺 Health check
 
 `bc_doctor` rolls up every check in one place - gitconfig, ssh config
-and permissions, systemd units, certs, atuin, fastfetch, secrets - and
-skips whatever does not apply to this machine's specialisation.
+and permissions, systemd units, certs, atuin, fastfetch, opencode,
+secrets - and skips whatever does not apply to this machine's
+specialisation.
 
 ```bash
 bc_doctor              # report only (read-only), offline
@@ -266,6 +268,51 @@ chezmoi --config "$cfg" execute-template < <(chezmoi decrypt \
 Note that CI renders every specialisation with `--exclude=encrypted`, so
 this template is never parsed there. A syntax error in it is caught only
 by the command above or by `chezmoi apply` on a real machine.
+
+---
+
+## 🧑‍💻 opencode
+
+`~/.config/opencode/opencode.jsonc` is tracked in plaintext and declares
+two OpenAI-compatible providers: `spark`, the self-hosted model
+reachable only over Tailscale, and `grace`, the Grace Hopper proxy at
+Diamond. Neither endpoint nor key appears in the file. Both are pulled
+from the environment with opencode's `{env:VAR}` syntax, which it
+substitutes into the raw config text before parsing, so it works for
+`baseURL` as well as `apiKey`. The four variables live in the encrypted
+`bash_secrets.sh`:
+
+```bash
+chezmoi edit --apply ~/.config/bash-config/bash_secrets.sh
+```
+
+```bash
+export OPENCODE_SPARK_BASE_URL=...   # Tailscale-only
+export OPENCODE_SPARK_API_KEY=...
+export OPENCODE_GRACE_BASE_URL=...   # needs a proxy into Diamond
+export OPENCODE_GRACE_API_KEY=...
+```
+
+Both providers are declared everywhere even though neither is reachable
+from every machine, so changing model is `/models` in the TUI rather
+than a config edit. An unset variable substitutes to the empty string
+rather than raising, and a config `apiKey` shadows anything stored by
+`opencode auth login` even when empty - which is why `bc_doctor` reports
+on the `spark` variables being present. Because opencode inherits the
+variables from the shell that launched it, it has to be started from a
+terminal that sourced `~/.bashrc`, not from a desktop launcher.
+
+The filename matters. opencode loads and *merges* `config.json`,
+`opencode.json` and `opencode.jsonc` from that directory, lowest
+priority first, so a leftover `config.json` is not overridden by this
+file - its settings survive underneath. Delete any older config on a
+machine rather than assuming the managed one wins.
+
+There is deliberately no `AGENTS.md`. opencode falls back to
+`~/.claude/CLAUDE.md` when one is absent, so the encrypted instructions
+above already apply; adding an `AGENTS.md` would silently shadow them.
+Everything else in `~/.config/opencode` (`package.json`, `node_modules`,
+`tui.json`) is opencode's own and left unmanaged.
 
 ---
 

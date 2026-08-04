@@ -49,6 +49,7 @@ _bc_doctor_gate_ok() {
         && command -v systemctl >/dev/null 2>&1 \
         && systemctl --user show-environment >/dev/null 2>&1 ;;
     has-keylist) _bc_ssh_expected_keys >/dev/null 2>&1 ;;
+    has-secrets) _bc_doctor_have_secrets ;;
     *) return 0 ;;
   esac
 }
@@ -63,6 +64,15 @@ _bc_doctor_have_spec()      { [[ -f "${BASH_CONFIG_DIR:-}/specialisation.sh" ]];
 _bc_doctor_have_atuin_cfg() { [[ -f "$HOME/.config/atuin/config.toml" ]]; }
 _bc_doctor_have_ff_cfg()    { [[ -f "$HOME/.config/fastfetch/config.jsonc" ]]; }
 _bc_doctor_have_secrets()   { [[ -f "${BASH_CONFIG_DIR:-}/bash_secrets.sh" ]]; }
+_bc_doctor_have_oc_cfg()    { [[ -f "$HOME/.config/opencode/opencode.jsonc" ]]; }
+
+# opencode resolves its endpoint and key from the environment at startup, and
+# an unset variable substitutes to the empty string rather than failing. Only
+# spark is checked: grace stays unset until the proxy into Diamond exists, so
+# demanding it would make this permanently noisy.
+_bc_doctor_oc_env_ok() {
+  [[ -n "${OPENCODE_SPARK_BASE_URL:-}" && -n "${OPENCODE_SPARK_API_KEY:-}" ]]
+}
 
 # systemd --user unit is active
 _bc_doctor_unit_active() { systemctl --user is-active --quiet "$1" 2>/dev/null; }
@@ -250,6 +260,10 @@ bc_doctor() {
     "manual:source ~/.bashrc, or 'chezmoi apply' to refetch the external"
   _bc_doctor_check "fastfetch"      always   safe   "_bc_doctor_have_ff_cfg" \
     "apply:~/.config/fastfetch/config.jsonc"
+  _bc_doctor_check "opencode-config" always  safe   "_bc_doctor_have_oc_cfg" \
+    "apply:~/.config/opencode/opencode.jsonc"
+  _bc_doctor_check "opencode-env"   has-secrets report "_bc_doctor_oc_env_ok" \
+    "manual:set OPENCODE_SPARK_* in bash_secrets.sh ('chezmoi edit --apply'), then re-source"
   _bc_doctor_check "secrets"        always   report "_bc_doctor_have_secrets" \
     "manual:'chezmoi apply' to decrypt bash_secrets.sh (may be intentionally absent)"
 

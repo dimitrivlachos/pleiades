@@ -62,6 +62,21 @@ jobs:
                 echo "::error::$spec: rendered specialisation.sh has a syntax error"
                 fail=1
               fi
+              # opencode.jsonc is JSONC, so drop the whole-line // comments
+              # before parsing - a blunter strip would eat the // in the
+              # $schema URL. Also check the default model names a provider and
+              # model that the file actually declares, which plain JSON
+              # validity cannot catch.
+              if python3 -c "import json; \
+                  src = open('$dest/.config/opencode/opencode.jsonc'); \
+                  cfg = json.loads(''.join(l for l in src if not l.lstrip().startswith('//'))); \
+                  p, _, m = cfg['model'].partition('/'); \
+                  assert m in cfg['provider'][p]['models']"; then
+                echo "ok   $spec: opencode JSONC valid, default model resolves"
+              else
+                echo "::error::$spec: opencode.jsonc invalid or default model unresolved"
+                fail=1
+              fi
             else
               echo "::error::$spec: chezmoi render failed"
               fail=1
