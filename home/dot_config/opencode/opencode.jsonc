@@ -13,6 +13,12 @@
 // into the Diamond network. Switching is then a /models away instead of
 // a config edit, and an unreachable provider costs nothing until used.
 //
+// Each limit.context mirrors the --max-model-len that spark's llama-swap
+// config gives that model's vLLM process (~/ai/spark-ai/llama-swap/
+// config.yaml). Declaring more here does not buy a longer window, it just
+// moves the failure from opencode to a mid-session vLLM error, so these
+// numbers have to be re-checked whenever that config changes.
+//
 // Comments must stay on their own line. The CI check strips lines whose
 // first non-whitespace characters are "//", which is what keeps the "//"
 // inside the $schema URL intact.
@@ -41,6 +47,40 @@
           "name": "Qwen3 Coder Next",
           "tool_call": true,
           "temperature": true,
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
+        },
+        "qwen3.6-27b": {
+          "id": "qwen3.6-27b",
+          "name": "Qwen3.6 27B (reasoning)",
+          "tool_call": true,
+          "temperature": true,
+          "reasoning": true,
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
+        },
+        "qwen3-30b-a3b": {
+          "id": "qwen3-30b-a3b",
+          "name": "Qwen3 30B-A3B (resident)",
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        },
+        "cydonia-24b": {
+          "id": "cydonia-24b",
+          "name": "Cydonia 24B (prose)",
+          "tool_call": true,
+          "temperature": true,
+          "options": {
+            "temperature": 1.05
+          },
           "limit": {
             "context": 65536,
             "output": 16384
