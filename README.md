@@ -59,12 +59,27 @@ required.
 
 ### 1. Install chezmoi and clone the source
 
+On Arch, prefer the packaged binary so pacman keeps it current:
+
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
+sudo pacman -S chezmoi
+chezmoi init dimitrivlachos/pleiades
 ```
 
-This installs chezmoi, clones the source, prompts for the machine
-specialisation, and writes `~/.config/chezmoi/chezmoi.toml`.
+Everywhere else, use the upstream installer:
+
+```bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" init dimitrivlachos/pleiades
+```
+
+`-b` is required. The installer defaults its target to `./bin` relative
+to the working directory, so running it from `$HOME` drops the binary at
+`~/bin`, which no shell has on its PATH - `bash_exports` adds
+`~/.local/bin` only. Without the flag chezmoi installs and works, but
+every later `chezmoi` command fails with "command not found".
+
+Either route clones the source, prompts for the machine specialisation,
+and writes `~/.config/chezmoi/chezmoi.toml`.
 
 That generated config pins `umask = 0o022`. chezmoi otherwise takes the
 target file modes from the umask of whichever process runs `apply`, so

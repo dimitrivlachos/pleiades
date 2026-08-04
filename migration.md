@@ -42,8 +42,17 @@ The repo is public on GitHub `main` now, so the clean runbook flow works
 because the branch was unmerged):
 
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
+# Arch
+sudo pacman -S chezmoi && chezmoi init dimitrivlachos/pleiades
+
+# elsewhere
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" init dimitrivlachos/pleiades
 ```
+
+- **Gotcha - the install location.** The installer's default target is
+  `./bin` relative to the working directory, so from `$HOME` it lands at
+  `~/bin/chezmoi`, which is on no shell's PATH. Pass `-b` or the next
+  terminal reports "chezmoi: command not found".
 
 This clones to `~/.local/share/chezmoi`, prompts for the specialisation,
 and writes `~/.config/chezmoi/chezmoi.toml`. It does **not** apply and

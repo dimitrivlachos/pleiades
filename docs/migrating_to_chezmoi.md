@@ -51,12 +51,26 @@ never merges on its own, so simply logging in is safe.
 
 ### 1. Install chezmoi and clone the source
 
+On Arch, take the packaged binary and let pacman own updates:
+
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
+sudo pacman -S chezmoi
+chezmoi init dimitrivlachos/pleiades
 ```
 
-This installs chezmoi, clones the source to `~/.local/share/chezmoi`,
-prompts for the machine specialisation (frostpaw / diamond / asteria),
+Everywhere else, use the upstream installer:
+
+```bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" init dimitrivlachos/pleiades
+```
+
+`-b` is not optional. The installer's default target is `./bin` relative
+to the working directory, so from `$HOME` it writes `~/bin/chezmoi`,
+which is on no shell's PATH here - `bash_exports` adds `~/.local/bin`
+and nothing else.
+
+Either route clones the source to `~/.local/share/chezmoi`, prompts for
+the machine specialisation (frostpaw / diamond / asteria),
 and writes `~/.config/chezmoi/chezmoi.toml`. It does not apply anything
 yet, and it does not need the age key at this stage.
 
