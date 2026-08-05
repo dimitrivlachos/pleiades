@@ -24,7 +24,7 @@ jobs:
         run: |
           set -u
           fail=0
-          for f in home/dot_config/bash-config/bashrc_core home/dot_config/bash-config/bash_*; do
+          for f in home/dot_config/bash-config/bashrc_core home/dot_config/bash-config/bash_* secrets.sh; do
             if bash -n "$f"; then
               echo "ok   $f"
             else
@@ -88,6 +88,20 @@ jobs:
             exit 1
           fi
           echo "ok: no plaintext secret files"
+
+      # The ./secrets.sh scratch pad holds the decrypted form of everything.
+      # Most of it would trip the filename check above, but the scratch layout
+      # mirrors $HOME (.claude/, not dot_claude/), so that glob misses the
+      # Claude instructions. Guard the directory itself and every future file
+      # in it is covered.
+      - name: Scratch pad must never be tracked
+        run: |
+          offenders="$(git ls-files -- '.secrets' '.secrets/*' || true)"
+          if [ -n "$offenders" ]; then
+            echo "$offenders" | sed 's/^/::error::decrypted scratch pad committed: /'
+            exit 1
+          fi
+          echo "ok: no scratch pad in the index"
 
       # Format: fail on material that is secret by shape, not by value, so no
       # sensitive string ever lives in this workflow. Prints filenames only.

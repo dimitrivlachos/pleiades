@@ -211,6 +211,41 @@ save so the result is visible straight away.
 Opening the `.age` file directly from the explorer shows the armored
 ciphertext, which is the point - always go through `chezmoi edit`.
 
+### Editing several at once
+
+`chezmoi edit` is one file at a time. For anything wider - grepping
+across the whole set, opening it in an editor sidebar, diffing two key
+handles - `./secrets.sh` unseals every encrypted file into a gitignored
+`.secrets/` directory laid out like the deployed `$HOME`:
+
+```bash
+./secrets.sh unseal          # all of them; `unseal ssh` or `unseal claude` to filter
+code .secrets/               # or $EDITOR, grep, whatever
+./secrets.sh status          # modified / unchanged / missing / stale
+./secrets.sh seal            # re-encrypt just what changed
+./secrets.sh clean           # remove the plaintext
+chezmoi apply                # seal does not deploy
+```
+
+`seal` re-encrypts only the files whose plaintext actually changed. age
+is non-deterministic, so encrypting an untouched file would produce
+different ciphertext and a meaningless diff; the plaintext hash recorded
+at unseal time is what prevents that. The ciphertext hash is recorded
+too, so a `git pull` landing under an open scratch session shows up as
+`stale` and `seal` refuses rather than reverting it.
+
+`.tmpl` is kept on the scratch copy (`.secrets/.claude/CLAUDE.md.tmpl`)
+so it is obvious you are editing template source and not a rendered
+file. Adding a genuinely new secret still goes through
+`chezmoi add --encrypt`, which is the only thing that can assign the
+source attributes; `seal` will warn about anything it cannot place.
+
+Single-file tweaks are still better served by
+`chezmoi edit --apply`, which re-renders the target for you.
+
+`.secrets/` is not `/secrets/` - the latter is the dissolved submodule's
+leftover plaintext checkout, also gitignored, and due for deletion.
+
 ---
 
 ## 🔧 Git Configuration

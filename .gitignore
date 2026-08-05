@@ -3,3 +3,8 @@
 # real plaintext, including the pre-rotation API key) but must never be
 # tracked here.
 /secrets/
+
+# The scratch pad written by ./secrets.sh unseal - the plaintext of every
+# encrypted_*.age file, laid out like the deployed $HOME. Distinct from
+# /secrets/ above, which is the dissolved submodule's leftover checkout.
+/.secrets/
