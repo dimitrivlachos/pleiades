@@ -1,20 +1,14 @@
 # Pleiades rollout - remaining machines
 
-Follow `MIGRATION-PLAYBOOK.md` on each box. spark-f222 (frostpaw) is
-done and merged (PR #2); the source of truth is GitHub
-`dimitrivlachos/pleiades` `main`.
+Follow `migration.md` (repo root) on each box. spark-f222, nova,
+polaris and the diamond systems are migrated; the source of truth is
+GitHub `dimitrivlachos/pleiades` `main`.
 
 ## Machines
 
-- [ ] **Remaining frostpaw workstations** (every frostpaw box except
-  spark-f222). Full stack: `bc_setup_ssh_agent_service`,
-  `bc_setup_atuin_daemon`, `bc_setup_certs`, then `bc_doctor` green.
-- [ ] **diamond** (work HPC). `bc_doctor` skips the atuin daemon and
-  certs; no ssh-agent unit; pixi keys off `DIAMOND_USERNAME`. Expect no
-  passwordless sudo and a locked-down `$HOME`.
-- [ ] **asteria** (headless Pi). systemd -> `bc_setup_ssh_agent_service`;
-  `atuin-homelab` config; no frostpaw daemon/certs. Age key goes in
-  over SSH.
+- [ ] **atlas** 
+- [ ] **asteria**
+- [ ] **acrux**
 
 ## Per box, in short (see playbook for the full checks)
 
@@ -31,6 +25,5 @@ done and merged (PR #2); the source of truth is GitHub
 
 - [ ] Delete the root `bashrc_core` compatibility stub.
 - [ ] Decommission the old `~/Documents/bash-config` checkout + `secrets`
-  submodule (runbook step 9).
-- [ ] Delete the local working docs: `PR-draft.md`,
-  `CHEZMOI-MIGRATION-REPORT.md`, `MIGRATION-PLAYBOOK.md`, and this file.
+  submodule (`docs/migrating_to_chezmoi.md` step 9).
+- [ ] Delete the working docs: `migration.md` and this file.

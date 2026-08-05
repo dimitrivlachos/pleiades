@@ -41,10 +41,10 @@ Ideas for future improvements to the bash configuration system.
   - `bc_env_list` to list available snapshots
   - Capture PWD, conda env, virtualenv, custom variables
 
-- [ ] **Session Recording & Logging** - Track detailed session activity
-  - `bc_start_session_log` to begin logging
-  - `bc_view_sessions` to review recent sessions
-  - Audit trail for debugging and accountability
+- [x] **Session Recording & Logging** - superseded by atuin. The daemon,
+  its health-check timer and cross-machine sync (`bash_history`) already
+  give a searchable, per-host audit trail, so a bespoke session log
+  would be a second worse copy of it.
 
 ## System Monitoring
 
@@ -55,10 +55,14 @@ Ideas for future improvements to the bash configuration system.
 
 ## Code Quality
 
-- [ ] **Pre-commit Hooks** - Automated validation before commits
-  - Syntax checking for all bash files
-  - Shellcheck integration
-  - Auto-formatting with shfmt
+- [x] **Automated validation** - landed as CI rather than a git hook:
+  `.github/workflows/verify.yml` runs `bash -n` over every module,
+  renders all three specialisations, validates the fastfetch and
+  opencode configs, and runs a four-step secret leak guard.
+  - [ ] Shellcheck integration
+  - [ ] Auto-formatting with shfmt
+  - [ ] Mirror the CI checks into a local pre-commit hook so a leak is
+    caught before it reaches GitHub, not after
 
 - [ ] **Performance Profiling** - Identify slow parts of bash config
   - Measure load time of each component
@@ -66,10 +70,11 @@ Ideas for future improvements to the bash configuration system.
 
 ## Documentation
 
-- [ ] **Interactive Help System** - Better discovery of available functions
-  - `bc_help` to show all available commands
-  - `bc_help <command>` for detailed help
-  - Auto-generate from function comments
+- [x] **Interactive Help System** - `bc_help` lists the commands and
+  takes a topic argument; `bc_ssh_help`, `bc_project_help`,
+  `update_help` and `hhelp` cover their own modules.
+  - [ ] Auto-generate the text from function comments instead of
+    maintaining it by hand
 
 ## Advanced Features
 

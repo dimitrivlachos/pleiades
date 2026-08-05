@@ -6,9 +6,9 @@ prescriptive than `docs/migrating_to_chezmoi.md` and records the gotchas
 that actually bit. Run it top to bottom **on the target machine**. Never
 apply blind - the `chezmoi diff` and the safety checks are the point.
 
-> To use this on another machine it has to be present there. It is
-> uncommitted, so either commit it to `docs/` first (then it travels with
-> the source), or paste it into the session on the target box.
+> This lives at the repo root and is tracked, so it travels with the
+> source. On a box that has not cloned yet, read it from GitHub or paste
+> it into the session there.
 
 ## Before you start (user, out-of-band - I cannot do these)
 
@@ -234,6 +234,5 @@ bc_doctor                    # expect all green
 - Delete the root `bashrc_core` compatibility stub - it only exists to
   catch an un-migrated box.
 - Decommission the old `~/Documents/bash-config` checkout and its
-  `secrets` submodule (runbook step 9).
-- Delete the local working docs: `PR-draft.md`,
-  `CHEZMOI-MIGRATION-REPORT.md`, and this playbook.
+  `secrets` submodule (`docs/migrating_to_chezmoi.md` step 9).
+- Delete the working docs and this playbook.
