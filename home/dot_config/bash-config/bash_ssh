@@ -190,12 +190,15 @@ bc_ssh_workday_setup() {
 # ==============================================================================
 # One agent per machine. Preference order in bc_ssh_agent_attach:
 #   1. An already-working agent (inherited env or forwarded from another host)
-#   2. The systemd user service socket (frostpaw/asteria, see
-#      configs/systemd/user/ssh-agent.service, installed by
+#   2. The systemd user service socket, on any host with a systemd user
+#      instance - Diamond workstations included (see
+#      home/dot_config/systemd/user/ssh-agent.service, installed by
 #      bc_setup_ssh_agent_service)
-#   3. A per-host env-file agent (diamond, no systemd --user; the env file is
-#      suffixed with the short hostname because the NFS home is shared across
-#      bastion/workstation nodes)
+#   3. A per-host env-file agent, for hosts with no systemd user instance;
+#      the env file is suffixed with the short hostname because the NFS home
+#      is shared across bastion/workstation nodes
+# The tiers select on capability, not specialisation: whether a systemd user
+# instance is running, not which specialisation the host declares.
 # Keys are loaded lazily: ssh_config sets AddKeysToAgent yes, so the first use
 # of a key caches it in the agent for every later operation.
 
@@ -246,7 +249,9 @@ bc_ssh_agent_attach() {
         return 0
     fi
 
-    # 3. File-based fallback for hosts without systemd --user (diamond).
+    # 3. File-based fallback for hosts with no systemd user instance, such as
+    #    the Diamond bastion and compute nodes. Diamond workstations do run
+    #    one and take tier 2 instead, so this is not specialisation-wide.
     #    Per-host env file: the NFS home is shared across bastion/ws nodes.
     #    $HOSTNAME rather than hostname(1), which isn't installed everywhere.
     local shorthost="${HOSTNAME:-$(uname -n)}"

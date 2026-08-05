@@ -1,0 +1,113 @@
+// Deployed by chezmoi to ~/.config/opencode/opencode.jsonc.
+//
+// Endpoints and API keys come from the age-encrypted bash_secrets.sh via
+// {env:...}, so nothing sensitive lives in this file. Same reasoning as
+// ~/.aider.conf.yml. opencode substitutes {env:VAR} into the raw config
+// text before parsing it, which is why it works inside baseURL as well
+// as apiKey. An unset variable becomes the empty string rather than an
+// error, so a missing key shows up as an auth failure at first use -
+// bc_doctor's opencode-env check exists to catch that earlier.
+//
+// Both providers are declared on every machine even though neither is
+// reachable everywhere: spark is Tailscale-only and grace needs a proxy
+// into the Diamond network. Switching is then a /models away instead of
+// a config edit, and an unreachable provider costs nothing until used.
+//
+// Each limit.context mirrors the --max-model-len that spark's llama-swap
+// config gives that model's vLLM process (~/ai/spark-ai/llama-swap/
+// config.yaml). Declaring more here does not buy a longer window, it just
+// moves the failure from opencode to a mid-session vLLM error, so these
+// numbers have to be re-checked whenever that config changes.
+//
+// Comments must stay on their own line. The CI check strips lines whose
+// first non-whitespace characters are "//", which is what keeps the "//"
+// inside the $schema URL intact.
+//
+// There is deliberately no ~/.config/opencode/AGENTS.md: opencode falls
+// back to ~/.claude/CLAUDE.md when one is absent, and that file is
+// already managed (encrypted) at private_dot_claude/. Adding an
+// AGENTS.md here would silently shadow it.
+//
+// Everything else in ~/.config/opencode is left unmanaged on purpose.
+// opencode owns package.json, node_modules and tui.json, and rewrites
+// them by itself; tracking them would only produce chezmoi drift.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "spark": {
+      "name": "Spark",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "{env:OPENCODE_SPARK_BASE_URL}",
+        "apiKey": "{env:OPENCODE_SPARK_API_KEY}"
+      },
+      "models": {
+        "qwen3-coder-next": {
+          "id": "qwen3-coder-next",
+          "name": "Qwen3 Coder Next",
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
+        },
+        "qwen3.6-27b": {
+          "id": "qwen3.6-27b",
+          "name": "Qwen3.6 27B (reasoning)",
+          "tool_call": true,
+          "temperature": true,
+          "reasoning": true,
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
+        },
+        "qwen3-30b-a3b": {
+          "id": "qwen3-30b-a3b",
+          "name": "Qwen3 30B-A3B (resident)",
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        },
+        "cydonia-24b": {
+          "id": "cydonia-24b",
+          "name": "Cydonia 24B (prose)",
+          "tool_call": true,
+          "temperature": true,
+          "options": {
+            "temperature": 1.05
+          },
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        }
+      }
+    },
+    "grace": {
+      "name": "Grace Hopper",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "{env:OPENCODE_GRACE_BASE_URL}",
+        "apiKey": "{env:OPENCODE_GRACE_API_KEY}"
+      },
+      "models": {
+        "qwen3-coder": {
+          "id": "qwen3-coder",
+          "name": "Qwen3 Coder",
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        }
+      }
+    }
+  },
+  "model": "spark/qwen3-coder-next"
+}

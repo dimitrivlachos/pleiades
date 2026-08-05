@@ -29,7 +29,7 @@ command -v chezmoi && chezmoi --version || echo "chezmoi not installed"
 [ -e ~/.config/chezmoi/chezmoi.toml ] && echo "already init'd" || echo "fresh"
 # Is it on the old install.sh layout? Survey the symlinks:
 for p in ~/.bashrc_core ~/.config/tmux ~/.aider.conf.yml \
-         ~/.aider.model.metadata.json ~/.ssh/config; do
+         ~/.aider.model.metadata.json ~/.ssh/config ~/.ssh/smart-proxy; do
   [ -L "$p" ] && echo "SYMLINK $p -> $(readlink "$p")"
 done
 find ~/.ssh -maxdepth 1 -type l -name 'id_ed25519_sk_*' | wc -l
@@ -42,8 +42,17 @@ The repo is public on GitHub `main` now, so the clean runbook flow works
 because the branch was unmerged):
 
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init dimitrivlachos/pleiades
+# Arch
+sudo pacman -S chezmoi && chezmoi init dimitrivlachos/pleiades
+
+# elsewhere
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" init dimitrivlachos/pleiades
 ```
+
+- **Gotcha - the install location.** The installer's default target is
+  `./bin` relative to the working directory, so from `$HOME` it lands at
+  `~/bin/chezmoi`, which is on no shell's PATH. Pass `-b` or the next
+  terminal reports "chezmoi: command not found".
 
 This clones to `~/.local/share/chezmoi`, prompts for the specialisation,
 and writes `~/.config/chezmoi/chezmoi.toml`. It does **not** apply and
@@ -63,26 +72,7 @@ install -m 600 -D /path/to/key.txt ~/.config/chezmoi/key.txt
 chezmoi cat ~/.config/bash-config/bash_secrets.sh >/dev/null && echo "decrypts OK"
 ```
 
-## 3. Clear the old install.sh symlinks (only if migrating off the old layout)
-
-chezmoi will not clean these, and one is actively dangerous: if
-`~/.config/tmux` is still a symlink into the old checkout, apply writes
-`tmux.conf` and the plugin externals **through** it into the old repo.
-Clear symlinks first, guarded so a real file is never removed:
-
-```bash
-for p in ~/.bashrc_core ~/.config/tmux ~/.aider.conf.yml \
-         ~/.aider.model.metadata.json ~/.ssh/config; do
-  [ -L "$p" ] && rm "$p" && echo "removed $p"
-done
-find ~/.ssh -maxdepth 1 -type l -name 'id_ed25519_sk_*' -print -delete
-[ -L ~/.config/atuin/config.toml ] && rm ~/.config/atuin/config.toml
-```
-
-On a genuinely fresh machine (no old layout) there is nothing to clear -
-those paths show up as `A` (create) in status, not `M`.
-
-## 4. Preview + safety checks (read-only, BEFORE apply)
+## 3. Preview + safety checks (read-only, BEFORE clearing or applying)
 
 ```bash
 chezmoi status          # A=create M=modify D=delete; read it
@@ -92,17 +82,59 @@ chezmoi diff ~/.gitconfig   # expect: includes repoint, ~/.gitconfig.local kept
 
 For a machine migrating from the old symlink layout, verify the SK key
 handles are **byte-identical** before apply, or FIDO/YubiKey SSH auth
-breaks (do not print key material - compare only):
+breaks (do not print key material - compare only). This has to run
+**before** step 4 clears the symlinks, or the files it compares against
+are already gone:
 
 ```bash
-for f in ~/.ssh/id_ed25519_sk_*; do
-  chezmoi cat "$f" 2>/dev/null | cmp -s - "$f" \
-    && echo "IDENTICAL $(basename "$f")" || echo "DIFFERS $(basename "$f")"
+cd ~/.ssh
+for f in id_ed25519_sk_*; do
+  if chezmoi cat "$HOME/.ssh/$f" 2>/dev/null | cmp -s - "$f"; then
+    echo "IDENTICAL $f"
+  elif diff -q <(tr -d '\r' < "$f") \
+               <(chezmoi cat "$HOME/.ssh/$f" | tr -d '\r') >/dev/null 2>&1; then
+    echo "LINE-ENDINGS-ONLY $f"
+  else
+    echo "DIFFERS $f"
+  fi
 done
 ```
 
-All `IDENTICAL` means the only change is symlink -> regular file. Any
-`DIFFERS` -> stop and investigate before applying.
+`IDENTICAL` means the only change is symlink -> regular file.
+`LINE-ENDINGS-ONLY` is also fine and is common on the `.pub` halves:
+handles written on a Windows-touched host carry CRLF and the repo has
+normalised them to LF, so applying strips a stray `\r`. The private
+handles are what FIDO auth actually signs with, and they should all come
+back `IDENTICAL` - any `DIFFERS` there, stop and investigate before
+applying.
+
+## 4. Clear the old install.sh symlinks (only if migrating off the old layout)
+
+chezmoi will not clean these, and one is actively dangerous: if
+`~/.config/tmux` is still a symlink into the old checkout, apply writes
+`tmux.conf` and the plugin externals **through** it into the old repo.
+`~/.ssh/smart-proxy` points into `scripts/` in the old checkout and
+carries the same hazard. Clear symlinks, guarded so a real file is never
+removed:
+
+```bash
+for p in ~/.bashrc_core ~/.config/tmux ~/.aider.conf.yml \
+         ~/.aider.model.metadata.json ~/.ssh/config ~/.ssh/smart-proxy; do
+  [ -L "$p" ] && rm "$p" && echo "removed $p"
+done
+find ~/.ssh -maxdepth 1 -type l -name 'id_ed25519_sk_*' -print -delete
+[ -L ~/.config/atuin/config.toml ] && rm ~/.config/atuin/config.toml
+```
+
+Confirm nothing live still points into the old checkout. `.snapshot`
+hits are NetApp read-only snapshots and are not real symlinks to clear:
+
+```bash
+find ~ -maxdepth 3 -type l -lname '*/bash-config/*' | grep -v '/.snapshot/'
+```
+
+On a genuinely fresh machine (no old layout) there is nothing to clear -
+those paths show up as `A` (create) in status, not `M`.
 
 ## 5. Apply
 
@@ -124,11 +156,37 @@ python3 -c "import json;json.load(open('$HOME/.config/fastfetch/config.jsonc'))"
 
 ```bash
 exec bash -l
-bc_setup_ssh_agent_service   # any non-diamond box with systemd
+bc_setup_ssh_agent_service   # any box with a systemd user instance
 bc_setup_atuin_daemon        # frostpaw only
 bc_setup_certs               # frostpaw only, needs sudo
 bc_doctor                    # expect all green
 ```
+
+- `exec bash -l` does **not** clear variables the old layout exported,
+  and they outrank the new config: `bashrc_core` honours an existing
+  `BASH_CONFIG_DIR` over its own auto-detection, so a reloaded shell
+  keeps resolving into the old checkout. `ATUIN_CONFIG_DIR` is worse,
+  because the new config sets it nowhere at all - it relies on atuin's
+  default path - so a stale export survives untouched and atuin fails
+  outright with `could not load client settings` the moment the old
+  checkout goes away. Take a genuinely fresh login, or in a shell worth
+  keeping:
+
+  ```bash
+  unset ATUIN_CONFIG_DIR BASH_CONFIG_DIR BASH_CONFIG_VERSION \
+        SSH_AUTH_SOCK SSH_AGENT_PID
+  exec bash -l
+  ```
+
+  Long-lived tmux sessions need the same treatment, and all of them do
+  before the old checkout is deleted.
+- `bc_setup_ssh_agent_service` is gated on systemd, not on
+  specialisation: the `ssh-agent` check in `bash_doctor` fires on any
+  host with a systemd user instance, Diamond workstations included.
+  Enablement writes to
+  `~/.config/systemd/user/default.target.wants/`, which is on the shared
+  NFS home, so enabling it once covers every Diamond machine; the socket
+  lives under `$XDG_RUNTIME_DIR` and stays per-machine.
 
 - The old `bc_doctor` ssh-keys false positive (a phantom
   `id_ed25519_personal`) is already fixed in the repo, so a green sweep
@@ -144,9 +202,11 @@ bc_doctor                    # expect all green
   `.chezmoi.arch`.
 - **diamond** - work HPC. `bc_doctor` skips the atuin daemon and certs
   (frostpaw-gated). atuin data dir is redirected; pixi keys off
-  `DIAMOND_USERNAME` in `bash_secrets.sh`. `bc_setup_ssh_agent_service`
-  is for non-diamond boxes, so diamond skips it. Watch for no
-  passwordless sudo and a locked-down `$HOME`.
+  `DIAMOND_USERNAME` in `bash_secrets.sh`. Run
+  `bc_setup_ssh_agent_service` on the workstations: they do run a
+  systemd user instance, so `bc_doctor` expects the unit and the
+  env-file fallback is only for the bastion and compute nodes. Watch for
+  no passwordless sudo and a locked-down `$HOME`.
 - **asteria** - headless server (Raspberry Pi). systemd present ->
   `bc_setup_ssh_agent_service`. Gets the `atuin-homelab` config, no
   frostpaw daemon/certs.
@@ -161,6 +221,10 @@ bc_doctor                    # expect all green
 - `~/.config/tmux` symlink write-through - clear it before apply.
 - SK handles show `M` in status purely because they convert
   symlink -> regular file; verify byte-identity, do not panic.
+- On ws448 the `.pub` halves also differed on line endings alone (CRLF on
+  disk, LF in the repo). The blobs and comments matched, so this is a
+  normalisation and not a key mismatch - hence the CR-stripped second
+  comparison in step 3.
 - atuin binary path: the units default to `~/.atuin/bin/atuin`; on a
   package-managed host (`/usr/bin/atuin`) `bc_setup_atuin_daemon` writes
   a per-host `ExecStart` drop-in instead of failing 203/EXEC.
