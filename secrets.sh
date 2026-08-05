@@ -1,27 +1,19 @@
 #!/bin/bash
 # ==============================================================================
-# Secrets scratch pad — bulk decrypt/edit/re-encrypt of the age-encrypted source
+# Secrets scratch pad - bulk decrypt/edit/re-encrypt of the age-encrypted source
 # ==============================================================================
-# `chezmoi edit` handles one file at a time through a private temp dir, which is
-# right for a one-line tweak and painful for anything wider: you cannot grep
-# across the set, open it all in an editor sidebar, or diff two key handles.
+# Decrypts every tracked encrypted_*.age file into .secrets/, laid out like the
+# deployed $HOME, and re-encrypts the changed ones.
 #
-# This unseals every tracked encrypted_*.age file into .secrets/, laid out like
-# the deployed $HOME, and seals the changed ones back.
+# age is non-deterministic, so only files whose plaintext hash changed since
+# unseal are re-encrypted. The ciphertext hash is tracked too: a source file
+# that changed since unseal is stale, and sealing over it needs --force.
 #
-# Two properties matter:
-#   - age is non-deterministic, so re-encrypting unchanged plaintext would churn
-#     every file in the repo for no reason. Plaintext hashes are recorded at
-#     unseal time and only genuinely modified files are re-encrypted.
-#   - The ciphertext hash is recorded too, so a `git pull` landing under an open
-#     scratch session is caught rather than silently reverted.
+# Operates on the clone it lives in, not `chezmoi source-path`; those are
+# separate trees on some machines, and encrypt/decrypt need only the config.
 #
-# The script acts on the clone it lives in, not on `chezmoi source-path`. Those
-# are different trees on some machines; encrypt/decrypt only need the config.
-#
-# `clean` is a plain rm, not shred: on a journaling filesystem an overwrite in
-# place is best-effort anyway, and offering shred would imply a guarantee the
-# filesystem does not make.
+# `clean` is a plain rm, not shred. Overwriting in place is best-effort on a
+# journaling filesystem, so shred would imply a guarantee it cannot make.
 #
 # Usage:
 #   ./secrets.sh unseal [filter...]   decrypt into .secrets/ (--force to clobber)
@@ -30,11 +22,11 @@
 #   ./secrets.sh clean                remove .secrets/
 #   ./secrets.sh help
 #
-# A filter is a substring matched against the source path, so `unseal ssh`,
-# `unseal claude` and `unseal bash-config` all do what they look like.
+# A filter is a substring matched against the source path: `unseal ssh`,
+# `unseal claude`, `unseal bash-config`.
 #
-# Note: .secrets/ (this scratch pad) is not /secrets/, the dissolved submodule's
-# leftover plaintext checkout that .gitignore also excludes.
+# .secrets/ is not /secrets/, the dissolved submodule's leftover plaintext
+# checkout that .gitignore also excludes.
 # ==============================================================================
 
 set -euo pipefail
@@ -44,7 +36,7 @@ SCRATCH="$ROOT/.secrets"
 MANIFEST="$SCRATCH/.manifest"
 IDENTITY="${CHEZMOI_AGE_IDENTITY:-$HOME/.config/chezmoi/key.txt}"
 
-# Anything this script creates holds plaintext secrets until proven otherwise.
+# Everything this script writes is plaintext secrets or derived from them.
 umask 077
 
 _log_info()    { printf '\033[0;36m  %s\033[0m\n' "$1"; }
@@ -65,8 +57,8 @@ preflight() {
     _log_error "chezmoi is not on PATH"
     exit 1
   fi
-  # Without this, age fails with an opaque "no identity matched any of the
-  # recipients" rather than saying the key is simply absent on this machine.
+  # age reports a missing identity as "no identity matched any of the
+  # recipients", which does not name the cause.
   if [[ ! -r "$IDENTITY" ]]; then
     _log_error "age identity not readable at $IDENTITY"
     _log_error "copy it out-of-band (Vaultwarden) before unsealing"
@@ -74,8 +66,8 @@ preflight() {
   fi
 }
 
-# Tracked ciphertext only, so a stray file in the working tree can never be
-# swept into the scratch pad. Populates the global SRCS array.
+# Populates SRCS with tracked ciphertext only; untracked files in the working
+# tree are never swept into the scratch pad.
 collect_sources() {
   local filters=("$@") src keep f
   SRCS=()
@@ -103,13 +95,12 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
 # Path mapping
 # ==============================================================================
 
-# chezmoi owns the encrypted_/private_/dot_ attribute grammar; asking it for the
-# target path is the only way to stay correct as that grammar evolves. One batch
-# call, one output line per input, in order.
+# Populates RELS with the scratch path for each entry in SRCS. chezmoi owns the
+# encrypted_/private_/dot_ attribute grammar, so the mapping is delegated to it
+# rather than reimplemented: one batch call, one output line per input, in order.
 #
-# chezmoi also strips .tmpl (it reports the rendered target). The scratch pad
-# keeps it, so what you are editing is visibly template source and not the
-# rendered file.
+# chezmoi reports the rendered target and so strips .tmpl. The scratch pad keeps
+# it, marking the file as template source rather than a rendered target.
 map_targets() {
   local -a targets
   mapfile -t targets < <(cd "$ROOT" && chezmoi --source "$ROOT/home" target-path "${SRCS[@]}")
@@ -139,10 +130,9 @@ map_targets() {
 #   unchanged untouched, seal will skip it
 #   missing   deleted from the scratch pad
 #
-# STALE is whether the .age changed underneath since unseal, and is tracked
-# separately because the two are orthogonal: a pull can land on a file you are
-# midway through editing. Folding drift into STATE would mask the pending edit
-# and let clean discard it.
+# STALE is whether the .age changed underneath since unseal. It is separate from
+# STATE because the two are orthogonal - a pull can land on a file that also has
+# a pending edit - and folding drift into STATE would mask that edit from clean.
 read_status() {
   declare -gA STATE=() STALE=() SRC_OF=()
   N_MODIFIED=0 N_UNCHANGED=0 N_MISSING=0 N_STALE=0
@@ -175,8 +165,8 @@ read_status() {
   done < "$MANIFEST"
 }
 
-# Scratch files with no manifest row: seal cannot place them, because only
-# `chezmoi add --encrypt` can assign the source attributes.
+# Populates UNTRACKED with scratch files that have no manifest row. seal cannot
+# place these; only `chezmoi add --encrypt` can assign the source attributes.
 list_untracked() {
   local f rel
   UNTRACKED=()
@@ -240,8 +230,7 @@ cmd_unseal() {
 
   preflight
 
-  # Clobbering pending edits is the worst thing this tool could do, so it is the
-  # one case that demands an explicit --force.
+  # Unsealing rewrites the scratch pad, so pending edits require --force.
   if [[ -f "$MANIFEST" && $force -eq 0 ]]; then
     read_status
     if [[ $N_MODIFIED -gt 0 ]]; then
@@ -256,8 +245,8 @@ cmd_unseal() {
   rm -rf "$SCRATCH"
   mkdir -p "$SCRATCH"
   chmod 0700 "$SCRATCH"
-  # Belt and braces: the scratch pad stays ignored even if the root .gitignore
-  # entry is lost to a rebase.
+  # Second line of defence: the scratch pad stays ignored independently of the
+  # root .gitignore entry.
   printf '*\n' > "$SCRATCH/.gitignore"
 
   : > "$MANIFEST"
@@ -322,8 +311,7 @@ cmd_seal() {
     fi
 
     case "${STATE[$rel]}" in
-      # Removing an encrypted file is a deliberate act for `chezmoi forget` and
-      # `git rm`, never a side effect of a stray rm in the scratch pad.
+      # Deleting a source file is left to `chezmoi forget` and `git rm`.
       missing)
         _log_warn "missing from scratch, source left alone: $rel"
         continue
@@ -348,9 +336,8 @@ cmd_seal() {
     _log_warn "no source for $rel - add it with: chezmoi add --encrypt ~/${rel%.tmpl}"
   done
 
-  # Hashes are now wrong for everything just re-encrypted, and age would give
-  # fresh ciphertext on a second pass regardless. Re-baselining keeps a repeated
-  # seal a genuine no-op.
+  # Re-baseline the hashes of what was just written, so a repeated seal is a
+  # no-op rather than a second round of fresh ciphertext.
   if [[ $sealed -gt 0 ]]; then
     local psha csha msrc mrel tmp
     tmp="$(mktemp)"
