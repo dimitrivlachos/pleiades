@@ -400,7 +400,8 @@ bc_ssh_agent_status() {
 # leave the machine. Interactive: ssh-keygen prompts for a passphrase, which
 # the agent then caches (AddKeysToAgent yes) so it's needed once per boot.
 # Echo the "keyname:description" list this specialisation is expected to have,
-# one per line. Empty output + return 1 for an unknown specialisation. Single
+# one per line. Empty output with return 0 means the specialisation holds no
+# keys of its own; return 1 means the specialisation is not recognised. Single
 # source of truth for both bc_setup_ssh_keys and the config doctor's key probe.
 _bc_ssh_expected_keys() {
     case "${BASH_SPECIALISATION:-}" in
@@ -410,8 +411,8 @@ _bc_ssh_expected_keys() {
                 "id_ed25519_github_s:GitHub second account"
             ;;
         asteria)
-            printf '%s\n' \
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
+            # Headless servers clone over HTTPS and are never pushed from, so
+            # they carry no key material of their own.
             ;;
         diamond)
             printf '%s\n' \
@@ -428,10 +429,15 @@ bc_setup_ssh_keys() {
     host="${host%%.*}"
     # key name → description shown when offering to generate it
     local -a expected=()
-    mapfile -t expected < <(_bc_ssh_expected_keys)
-    if [[ ${#expected[@]} -eq 0 ]]; then
+    local list
+    if ! list="$(_bc_ssh_expected_keys)"; then
         bc_log_warn "Unknown specialisation '${BASH_SPECIALISATION:-}', no key list defined"
         return 1
+    fi
+    [[ -n "$list" ]] && mapfile -t expected <<< "$list"
+    if [[ ${#expected[@]} -eq 0 ]]; then
+        bc_log_success "Specialisation '${BASH_SPECIALISATION:-}' expects no SSH keys"
+        return 0
     fi
 
     local entry key desc keyfile generated=0

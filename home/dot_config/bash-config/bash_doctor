@@ -48,7 +48,7 @@ _bc_doctor_gate_ok() {
       [[ "${BASH_SPECIALISATION:-}" == "frostpaw" ]] \
         && command -v systemctl >/dev/null 2>&1 \
         && systemctl --user show-environment >/dev/null 2>&1 ;;
-    has-keylist) _bc_ssh_expected_keys >/dev/null 2>&1 ;;
+    has-keylist) [[ -n "$(_bc_ssh_expected_keys 2>/dev/null)" ]] ;;
     has-secrets) _bc_doctor_have_secrets ;;
     *) return 0 ;;
   esac
