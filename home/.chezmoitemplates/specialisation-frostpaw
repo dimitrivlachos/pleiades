@@ -45,10 +45,12 @@ fi
 # SSH Askpass (KDE desktop only)
 # ------------------------------------------------------------------------------
 # Lets GUI-launched processes (VS Code, git GUIs) prompt for key passphrases.
-# "prefer" still uses the terminal when one is available. Gated on the binary
-# existing; headless Ubuntu/Debian frostpaw machines won't have it.
+# SSH_ASKPASS_REQUIRE is deliberately unset: ssh then falls back to the helper
+# only when there is no controlling TTY, so terminal sessions prompt inline.
+# Gated on the binary existing; headless Ubuntu/Debian frostpaw machines
+# won't have it.
 if command -v ksshaskpass &>/dev/null; then
   export SSH_ASKPASS
   SSH_ASKPASS=$(command -v ksshaskpass)
-  export SSH_ASKPASS_REQUIRE=prefer
+  #export SSH_ASKPASS_REQUIRE=prefer
 fi
