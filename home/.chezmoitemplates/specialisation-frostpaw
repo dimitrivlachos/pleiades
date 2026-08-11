@@ -49,8 +49,8 @@ fi
 # only when there is no controlling TTY, so terminal sessions prompt inline.
 # Gated on the binary existing; headless Ubuntu/Debian frostpaw machines
 # won't have it.
-if command -v ksshaskpass &>/dev/null; then
-  export SSH_ASKPASS
-  SSH_ASKPASS=$(command -v ksshaskpass)
-  #export SSH_ASKPASS_REQUIRE=prefer
-fi
+# if command -v ksshaskpass &>/dev/null; then
+#   export SSH_ASKPASS
+#   SSH_ASKPASS=$(command -v ksshaskpass)
+#   export SSH_ASKPASS_REQUIRE=prefer
+# fi
