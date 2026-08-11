@@ -182,10 +182,14 @@ _bc_doctor_apply_fixes() {
       fn:*)
         fn="${remedy#fn:}"
         if [[ "$risk" == "prompt" ]]; then
-          reply=""
-          read -rp "  Fix '$label' with $fn? (y/N): " reply </dev/tty 2>/dev/null || {
+          # read writes its -p prompt to stderr, so stderr must stay attached
+          # for the question to be visible. The terminal is probed separately
+          # to keep the headless path silent.
+          if ! { : </dev/tty; } 2>/dev/null; then
             bc_log_info "Skipped '$label' (no terminal to confirm)"; continue
-          }
+          fi
+          reply=""
+          read -rp "  Fix '$label' with $fn? (y/N): " reply </dev/tty
           [[ "$reply" =~ ^[Yy]$ ]] || { bc_log_info "Skipped '$label'"; continue; }
         fi
         bc_log_info "Fixing '$label' -> $fn"
