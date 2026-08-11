@@ -1,14 +1,6 @@
 # Pleiades rollout - remaining machines
 
-Follow `migration.md` (repo root) on each box. spark-f222, nova,
-polaris and the diamond systems are migrated; the source of truth is
-GitHub `dimitrivlachos/pleiades` `main`.
-
-## Machines
-
-- [ ] **atlas** 
 - [ ] **asteria**
-- [ ] **acrux**
 
 ## Per box, in short (see playbook for the full checks)
 
