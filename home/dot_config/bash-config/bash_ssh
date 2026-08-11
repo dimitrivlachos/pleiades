@@ -416,7 +416,8 @@ _bc_ssh_expected_keys() {
             ;;
         diamond)
             printf '%s\n' \
-                "id_ed25519_github_d:GitHub main account (dimitrivlachos)"
+                "id_ed25519_github_d:GitHub main account (dimitrivlachos)" \
+                "id_ed25519_gitlab:Diamond GitLab (gitlab.diamond.ac.uk)"
             ;;
         *)
             return 1
@@ -479,6 +480,8 @@ bc_setup_ssh_keys() {
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub main account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
             id_ed25519_github_s)
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → GitHub second account: Settings → SSH and GPG keys${BC_COLOR_RESET}" ;;
+            id_ed25519_gitlab)
+                echo -e "  ${BC_COLOR_CYAN}$key.pub → Diamond GitLab: Preferences → SSH Keys${BC_COLOR_RESET}" ;;
             *)
                 echo -e "  ${BC_COLOR_CYAN}$key.pub → deploy to the matching host's authorized_keys${BC_COLOR_RESET}" ;;
         esac
